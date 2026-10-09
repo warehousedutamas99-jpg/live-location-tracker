@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Location Sharing - Otomatis</title>
+  <title>Live Location Sharing - Realtime Database</title>
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -49,29 +49,36 @@
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- MQTT JS -->
-  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <!-- Firebase JS SDK (v8) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
   <script>
-    // 1. Inisialisasi Peta
+    // Konfigurasi Database Publik Siap Pakai
+    const firebaseConfig = {
+      databaseURL: "https://location-tracker-demo-default-rtdb.asia-southeast1.firebasedatabase.app/"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const database = firebase.database();
+
+    // Inisialisasi Peta
     const map = L.map('map').setView([-6.200000, 106.816666], 13);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
       attribution: 'Tiles &copy; Esri'
     }).addTo(map);
 
-    // ID Unik Otomatis untuk setiap user yang buka link
     const myUserId = "User_" + Math.floor(1000 + Math.random() * 9000);
     const markers = {};
     const activeUsers = {};
     let watchId = null;
     let myCoords = null;
-    
-    // Topik umum agar semua orang yang buka link ini otomatis masuk ke tempat yang sama
-    const currentTopic = "live_gps_tracker_global_room_v1";
-    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8000/mqtt');
 
-    // 2. Rumus Hitung Jarak (Haversine)
+    const userRef = database.ref('active_locations/' + myUserId);
+    const allLocationsRef = database.ref('active_locations');
+
+    // Hitung Jarak (Haversine)
     function hitungJarak(lat1, lon1, lat2, lon2) {
       const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -85,40 +92,7 @@
       return distance < 1 ? Math.round(distance * 1000) + " meter" : distance.toFixed(2) + " km";
     }
 
-    // 3. Sambungkan ke Server MQTT
-    mqttClient.on('connect', () => {
-      document.getElementById("status").innerText = "Terhubung ke Server";
-      mqttClient.subscribe(currentTopic);
-      // Panggil user lain agar langsung lapor balik posisi mereka
-      mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "ping" }));
-    });
-
-    mqttClient.on('message', (topic, message) => {
-      try {
-        const data = JSON.parse(message.toString());
-
-        if (data.action === "offline") {
-          if (markers[data.id]) {
-            map.removeLayer(markers[data.id]);
-            delete markers[data.id];
-          }
-          delete activeUsers[data.id];
-        } else if (data.action === "ping") {
-          // Jika ada user baru masuk, langsung kirimkan posisi kita sekarang ke dia
-          if (myCoords) {
-            sendLocationUpdate(myCoords.lat, myCoords.lng, activeUsers[myUserId]?.accuracy || 10);
-          }
-        } else if (data.id !== myUserId) {
-          activeUsers[data.id] = { lat: data.lat, lng: data.lng, accuracy: data.accuracy };
-          updateMarker(data.id, data.lat, data.lng, "<b>" + data.id + "</b>");
-        }
-        perbaruiDaftarPengguna();
-      } catch (e) {
-        console.error(e);
-      }
-    });
-
-    // 4. OTOMATIS JALANKAN LOKASI SAAT HALAMAN DIBUKA
+    // 1. Ambil Lokasi GPS Otomatis
     function startTrackingOtomatis() {
       if ("geolocation" in navigator) {
         watchId = navigator.geolocation.watchPosition(
@@ -126,47 +100,61 @@
             const { latitude, longitude, accuracy } = position.coords;
             myCoords = { lat: latitude, lng: longitude };
 
-            activeUsers[myUserId] = { lat: latitude, lng: longitude, accuracy: Math.round(accuracy) };
-            updateMarker(myUserId, latitude, longitude, "<b>Lokasi Saya</b> (" + myUserId + ")");
-            
-            // Fokuskan peta ke posisi user pertama kali
+            // Simpan & Update ke Firebase Realtime Database
+            userRef.set({
+              lat: latitude,
+              lng: longitude,
+              accuracy: Math.round(accuracy),
+              lastUpdate: Date.now()
+            });
+
+            userRef.onDisconnect().remove(); // Hapus data otomatis saat tab/browser ditutup
+
             if (document.getElementById("status").innerText.includes("Menghubungkan")) {
               map.setView([latitude, longitude], 16);
             }
 
-            sendLocationUpdate(latitude, longitude, Math.round(accuracy));
             document.getElementById("status").innerText = "AKTIF (±" + Math.round(accuracy) + "m)";
-            perbaruiDaftarPengguna();
           },
           (err) => {
-            document.getElementById("status").innerText = "Gagal Akses GPS";
-            alert("Izinkan akses lokasi/GPS di browser HP Anda agar fitur ini berfungsi.");
+            document.getElementById("status").innerText = "GPS Ditolak/Error";
+            alert("Harap izinkan akses lokasi GPS pada browser.");
           },
           { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
         );
-      } else {
-        alert("Browser tidak mendukung lokasi.");
       }
     }
 
-    function sendLocationUpdate(lat, lng, accuracy) {
-      if (mqttClient && mqttClient.connected) {
-        mqttClient.publish(currentTopic, JSON.stringify({
-          id: myUserId,
-          lat: lat,
-          lng: lng,
-          accuracy: accuracy
-        }));
-      }
-    }
+    // 2. Menerima Perubahan Data Pengguna Secara Realtime dari Firebase
+    allLocationsRef.on('value', (snapshot) => {
+      const data = snapshot.val() || {};
 
-    function updateMarker(id, lat, lng, popupText) {
-      if (markers[id]) {
-        markers[id].setLatLng([lat, lng]);
-      } else {
-        markers[id] = L.marker([lat, lng]).addTo(map).bindPopup(popupText);
+      // Hapus marker user yang offline
+      for (let id in markers) {
+        if (!data[id]) {
+          map.removeLayer(markers[id]);
+          delete markers[id];
+          delete activeUsers[id];
+        }
       }
-    }
+
+      // Perbarui atau tambah marker semua user yang online
+      for (let id in data) {
+        const user = data[id];
+        activeUsers[id] = user;
+
+        const isMe = (id === myUserId);
+        const labelText = isMe ? "<b>Lokasi Saya</b> (" + id + ")" : "<b>" + id + "</b>";
+
+        if (markers[id]) {
+          markers[id].setLatLng([user.lat, user.lng]);
+        } else {
+          markers[id] = L.marker([user.lat, user.lng]).addTo(map).bindPopup(labelText);
+        }
+      }
+
+      perbaruiDaftarPengguna();
+    });
 
     function perbaruiDaftarPengguna() {
       const userListEl = document.getElementById("userList");
@@ -197,16 +185,12 @@
       });
     }
 
-    // Jalankan pelacakan otomatis begitu halaman selesai dimuat
     window.onload = () => {
       startTrackingOtomatis();
     };
 
-    // Laporkan status offline saat tab ditutup
     window.addEventListener('beforeunload', () => {
-      if (mqttClient) {
-        mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "offline" }));
-      }
+      userRef.remove();
     });
   </script>
 
