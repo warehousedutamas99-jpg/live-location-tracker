@@ -62,11 +62,10 @@
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- MQTT JS (Koneksi Lintas Device Berbasis WebSocket) -->
+  <!-- MQTT JS -->
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
   <script>
-    // 1. Inisialisasi Peta Esri
     const map = L.map('map').setView([-6.200000, 106.816666], 13);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
@@ -81,7 +80,6 @@
     let mqttClient = null;
     let currentTopic = "";
 
-    // 2. Rumus Haversine (Hitung Jarak)
     function hitungJarak(lat1, lon1, lat2, lon2) {
       const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -95,7 +93,6 @@
       return distance < 1 ? Math.round(distance * 1000) + " meter" : distance.toFixed(2) + " km";
     }
 
-    // 3. Fungsi Mulai / Henti Berbagi Lokasi
     function toggleTracking() {
       const btn = document.getElementById("toggleBtn");
       const status = document.getElementById("status");
@@ -105,15 +102,12 @@
         if ("geolocation" in navigator) {
           status.innerText = "Mencari GPS & Server...";
 
-          // Hubungkan ke Broker MQTT Publik
           currentTopic = "live_gps_tracker_room_" + room;
           mqttClient = mqtt.connect('wss://broker.hivemq.com:8000/mqtt');
 
           mqttClient.on('connect', () => {
             status.innerText = "Terhubung ke Server";
             mqttClient.subscribe(currentTopic);
-            
-            // Kirim pesan salam agar pengguna lain langsung mendeteksi
             mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "ping" }));
           });
 
@@ -128,7 +122,6 @@
                 }
                 delete activeUsers[data.id];
               } else if (data.action === "ping") {
-                // Balas dengan koordinat jika kita sudah punya GPS
                 if (myCoords) {
                   sendLocationUpdate(myCoords.lat, myCoords.lng, activeUsers[myUserId]?.accuracy || 10);
                 }
@@ -142,7 +135,6 @@
             }
           });
 
-          // Mulai Ambil GPS Realtime
           watchId = navigator.geolocation.watchPosition(
             (position) => {
               const { latitude, longitude, accuracy } = position.coords;
