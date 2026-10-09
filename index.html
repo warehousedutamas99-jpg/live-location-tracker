@@ -3,22 +3,21 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Location Sharing Professional</title>
+  <title>Live Location Sharing - Realtime</title>
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #0f172a; color: #f8fafc; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #0f172a; color: #f8fafc; }
     
-    header { background: #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
-    .title-container { display: flex; align-items: center; gap: 10px; }
+    header { background: #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
     .title-container h2 { font-size: 18px; font-weight: 600; color: #f8fafc; }
     
     .status-badge { background: #334155; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 6px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background-color: #38bdf8; display: inline-block; }
-    .status-dot.active { background-color: #4ade80; box-shadow: 0 0 8px #4ade80; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background-color: #ef4444; display: inline-block; }
+    .status-dot.active { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
     
     .container { display: flex; flex: 1; position: relative; overflow: hidden; }
     #map { flex: 1; height: 100%; background: #020617; }
@@ -29,12 +28,11 @@
     .user-count { background: #0f172a; padding: 2px 8px; border-radius: 12px; font-size: 11px; color: #94a3b8; }
     
     .user-list { list-style: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; }
-    .user-item { background: #0f172a; border: 1px solid #334155; padding: 12px 14px; border-radius: 8px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; transition: all 0.2s; }
-    .user-item:hover { border-color: #475569; }
+    .user-item { background: #0f172a; border: 1px solid #334155; padding: 12px 14px; border-radius: 8px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
     .user-item.is-me { border-left: 4px solid #38bdf8; }
-    .user-item .user-name { font-weight: 600; color: #f8fafc; display: flex; justify-content: space-between; align-items: center; }
+    .user-item .user-name { font-weight: 600; color: #f8fafc; }
     .user-item .accuracy { font-size: 11px; color: #64748b; }
-    .user-item .distance { color: #4ade80; font-weight: 600; font-size: 12px; margin-top: 2px; }
+    .user-item .distance { color: #22c55e; font-weight: 600; font-size: 12px; margin-top: 2px; }
 
     @media (max-width: 640px) {
       .container { flex-direction: column-reverse; }
@@ -48,9 +46,9 @@
     <div class="title-container">
       <h2>Live Location Sharing</h2>
     </div>
-    <div class="status-badge" id="statusBadge">
+    <div class="status-badge">
       <span class="status-dot" id="statusDot"></span>
-      <span id="statusText">Menghubungkan Server...</span>
+      <span id="statusText">Mencari GPS...</span>
     </div>
   </header>
 
@@ -69,32 +67,22 @@
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- PubNub SDK (Reliable Realtime Global Broadcast) -->
-  <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.2.2.min.js"></script>
 
   <script>
-    // 1. Inisialisasi Peta
+    // Database URL Publik Siap Pakai
+    const DB_URL = "https://live-tracker-default-rtdb.asia-southeast1.firebasedatabase.app/users";
+
     const map = L.map('map').setView([-6.200000, 106.816666], 13);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
       attribution: 'Tiles &copy; Esri'
     }).addTo(map);
 
-    const myUserId = "Pengguna_" + Math.floor(1000 + Math.random() * 9000);
+    const myUserId = "User_" + Math.floor(1000 + Math.random() * 9000);
     const markers = {};
-    const activeUsers = {};
+    let activeUsers = {};
     let myCoords = null;
 
-    // 2. Inisialisasi PubNub Realtime Network (Publik Demo Keys)
-    const pubnub = new PubNub({
-      publishKey: "pub-c-b5f7e7f7-5114-411a-821f-f446059c4701",
-      subscribeKey: "sub-c-1a525f0a-6f03-11ec-bf8f-82bfdf1c450d",
-      userId: myUserId
-    });
-
-    const channelName = "live_location_room_global";
-
-    // 3. Rumus Haversine (Jarak Antar Koordinat)
     function hitungJarak(lat1, lon1, lat2, lon2) {
       const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -108,37 +96,62 @@
       return distance < 1 ? Math.round(distance * 1000) + " meter" : distance.toFixed(2) + " km";
     }
 
-    // 4. Langganan Pesan Realtime
-    pubnub.subscribe({ channels: [channelName] });
+    // 1. Kirim Lokasi Kita ke Server
+    function updateLokasiSaya(lat, lng, accuracy) {
+      const data = {
+        lat: lat,
+        lng: lng,
+        accuracy: accuracy,
+        updatedAt: Date.now()
+      };
 
-    pubnub.addListener({
-      status: (statusEvent) => {
-        if (statusEvent.category === "PNConnectedCategory") {
-          updateStatus("Mencari GPS...", false);
-          startGPS();
-          // Minta pengguna lain mengirim lokasinya
-          pubnub.publish({
-            channel: channelName,
-            message: { id: myUserId, type: "request_sync" }
+      fetch(`${DB_URL}/${myUserId}.json`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+      });
+    }
+
+    // 2. Ambil Semua Lokasi User yang Aktif
+    function syncSemuaUser() {
+      fetch(`${DB_URL}.json`)
+        .then(res => res.json())
+        .then(data => {
+          if (!data) data = {};
+          activeUsers = data;
+
+          const sekarang = Date.now();
+          const activeIds = Object.keys(data);
+
+          // Hapus user yang sudah tidak aktif (> 30 detik)
+          for (let id in markers) {
+            if (!data[id] || (sekarang - data[id].updatedAt > 30000)) {
+              map.removeLayer(markers[id]);
+              delete markers[id];
+              delete activeUsers[id];
+            }
+          }
+
+          // Update marker di peta
+          Object.keys(activeUsers).forEach(id => {
+            const user = activeUsers[id];
+            if (sekarang - user.updatedAt <= 30000) { // Hanya yang aktif kurang dari 30 detik
+              const isMe = id === myUserId;
+              const popup = isMe ? `<b>Lokasi Saya</b> (${id})` : `<b>${id}</b>`;
+
+              if (markers[id]) {
+                markers[id].setLatLng([user.lat, user.lng]);
+              } else {
+                markers[id] = L.marker([user.lat, user.lng]).addTo(map).bindPopup(popup);
+              }
+            }
           });
-        }
-      },
-      message: (event) => {
-        const msg = event.message;
 
-        if (msg.type === "offline") {
-          removeUser(msg.id);
-        } else if (msg.type === "request_sync") {
-          if (myCoords) sendMyLocation();
-        } else if (msg.id !== myUserId) {
-          activeUsers[msg.id] = { lat: msg.lat, lng: msg.lng, accuracy: msg.accuracy, lastUpdate: Date.now() };
-          updateUserMarker(msg.id, msg.lat, msg.lng, `<b>${msg.id}</b>`);
           renderUserList();
-        }
-      }
-    });
+        });
+    }
 
-    // 5. Ambil Lokasi GPS Realtime
+    // 3. Jalankan GPS Realtime
     function startGPS() {
       if ("geolocation" in navigator) {
         navigator.geolocation.watchPosition(
@@ -146,55 +159,22 @@
             const { latitude, longitude, accuracy } = pos.coords;
             myCoords = { lat: latitude, lng: longitude };
 
-            activeUsers[myUserId] = { lat: latitude, lng: longitude, accuracy: Math.round(accuracy), lastUpdate: Date.now() };
-            
-            updateUserMarker(myUserId, latitude, longitude, `<b>Lokasi Saya</b> (${myUserId})`);
-            
+            updateStatus(`AKTIF (±${Math.round(accuracy)}m)`, true);
+
             if (document.getElementById("statusText").innerText.includes("Mencari GPS")) {
               map.setView([latitude, longitude], 16);
             }
 
-            updateStatus(`AKTIF (±${Math.round(accuracy)}m)`, true);
-            sendMyLocation();
-            renderUserList();
+            updateLokasiSaya(latitude, longitude, Math.round(accuracy));
+            syncSemuaUser();
           },
           (err) => {
-            updateStatus("Akses GPS Ditolak", false);
-            alert("Harap izinkan akses lokasi pada browser HP/PC Anda.");
+            updateStatus("GPS Ditolak/Error", false);
+            alert("Harap izinkan akses GPS di browser HP/PC Anda.");
           },
           { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
         );
       }
-    }
-
-    function sendMyLocation() {
-      if (!myCoords) return;
-      pubnub.publish({
-        channel: channelName,
-        message: {
-          id: myUserId,
-          lat: myCoords.lat,
-          lng: myCoords.lng,
-          accuracy: activeUsers[myUserId]?.accuracy || 0
-        }
-      });
-    }
-
-    function updateUserMarker(id, lat, lng, popupContent) {
-      if (markers[id]) {
-        markers[id].setLatLng([lat, lng]);
-      } else {
-        markers[id] = L.marker([lat, lng]).addTo(map).bindPopup(popupContent);
-      }
-    }
-
-    function removeUser(id) {
-      if (markers[id]) {
-        map.removeLayer(markers[id]);
-        delete markers[id];
-      }
-      delete activeUsers[id];
-      renderUserList();
     }
 
     function updateStatus(text, isActive) {
@@ -229,9 +209,7 @@
         const li = document.createElement("li");
         li.className = `user-item ${isMe ? 'is-me' : ''}`;
         li.innerHTML = `
-          <div class="user-name">
-            <span>${isMe ? id + ' (Anda)' : id}</span>
-          </div>
+          <div class="user-name">${isMe ? id + ' (Anda)' : id}</div>
           <div class="accuracy">Akurasi GPS: ±${user.accuracy}m</div>
           <div class="distance">${distanceText}</div>
         `;
@@ -239,12 +217,13 @@
       });
     }
 
-    // Pembersihan saat tab ditutup
+    // Jalankan Sinkronisasi setiap 3 detik
+    startGPS();
+    setInterval(syncSemuaUser, 3000);
+
+    // Hapus data saat tab ditutup
     window.addEventListener('beforeunload', () => {
-      pubnub.publish({
-        channel: channelName,
-        message: { id: myUserId, type: "offline" }
-      });
+      fetch(`${DB_URL}/${myUserId}.json`, { method: 'DELETE' });
     });
   </script>
 
