@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Location - Multi Device</title>
+  <title>Live Location Sharing - Multi Device</title>
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -41,7 +41,7 @@
   <header>
     <div class="top-bar">
       <h2>Live Location Sharing</h2>
-      <span class="status-badge" id="status">Status: SIAP</span>
+      <span class="status-badge" id="status">Status: Nonaktif</span>
     </div>
     <div class="room-bar">
       <label style="font-size: 12px;">Kode Ruangan:</label>
@@ -55,18 +55,18 @@
     <div class="sidebar">
       <h3>Daftar Pengguna Aktif</h3>
       <ul class="user-list" id="userList">
-        <li style="color: #9ca3af; font-size: 12px;">Klik "Bagikan Lokasi" untuk terhubung...</li>
+        <li style="color: #9ca3af; font-size: 12px;">Klik "Bagikan Lokasi" untuk bergabung...</li>
       </ul>
     </div>
   </div>
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- PeerJS JS (Koneksi Lintas Device/Internet) -->
-  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+  <!-- MQTT JS (Koneksi Lintas Device Berbasis WebSocket) -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
   <script>
-    // 1. Inisialisasi Peta
+    // 1. Inisialisasi Peta Esri
     const map = L.map('map').setView([-6.200000, 106.816666], 13);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
@@ -78,8 +78,8 @@
     const activeUsers = {};
     let watchId = null;
     let myCoords = null;
-    let peer = null;
-    const connections = [];
+    let mqttClient = null;
+    let currentTopic = "";
 
     // 2. Rumus Haversine (Hitung Jarak)
     function hitungJarak(lat1, lon1, lat2, lon2) {
@@ -95,44 +95,64 @@
       return distance < 1 ? Math.round(distance * 1000) + " meter" : distance.toFixed(2) + " km";
     }
 
-    // 3. Fungsi Mulai/Henti Lintas Device
+    // 3. Fungsi Mulai / Henti Berbagi Lokasi
     function toggleTracking() {
       const btn = document.getElementById("toggleBtn");
       const status = document.getElementById("status");
-      const room = document.getElementById("roomId").value.trim();
+      const room = document.getElementById("roomId").value.trim() || "ruang123";
 
       if (watchId === null) {
         if ("geolocation" in navigator) {
           status.innerText = "Mencari GPS & Server...";
 
-          // Inisialisasi PeerJS Server
-          peer = new Peer(myUserId + "_" + room);
+          // Hubungkan ke Broker MQTT Publik
+          currentTopic = "live_gps_tracker_room_" + room;
+          mqttClient = mqtt.connect('wss://broker.hivemq.com:8000/mqtt');
 
-          peer.on('open', (id) => {
+          mqttClient.on('connect', () => {
             status.innerText = "Terhubung ke Server";
+            mqttClient.subscribe(currentTopic);
+            
+            // Kirim pesan salam agar pengguna lain langsung mendeteksi
+            mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "ping" }));
           });
 
-          peer.on('connection', (conn) => {
-            setupConnection(conn);
+          mqttClient.on('message', (topic, message) => {
+            try {
+              const data = JSON.parse(message.toString());
+
+              if (data.action === "offline") {
+                if (markers[data.id]) {
+                  map.removeLayer(markers[data.id]);
+                  delete markers[data.id];
+                }
+                delete activeUsers[data.id];
+              } else if (data.action === "ping") {
+                // Balas dengan koordinat jika kita sudah punya GPS
+                if (myCoords) {
+                  sendLocationUpdate(myCoords.lat, myCoords.lng, activeUsers[myUserId]?.accuracy || 10);
+                }
+              } else if (data.id !== myUserId) {
+                activeUsers[data.id] = { lat: data.lat, lng: data.lng, accuracy: data.accuracy };
+                updateMarker(data.id, data.lat, data.lng, "<b>" + data.id + "</b>");
+              }
+              perbaruiDaftarPengguna();
+            } catch (e) {
+              console.error(e);
+            }
           });
 
-          // Mulai Ambil GPS
+          // Mulai Ambil GPS Realtime
           watchId = navigator.geolocation.watchPosition(
             (position) => {
               const { latitude, longitude, accuracy } = position.coords;
               myCoords = { lat: latitude, lng: longitude };
 
               activeUsers[myUserId] = { lat: latitude, lng: longitude, accuracy: Math.round(accuracy) };
-              updateMarker(myUserId, latitude, longitude, "<b>Lokasi Saya</b>");
+              updateMarker(myUserId, latitude, longitude, "<b>Lokasi Saya</b> (" + myUserId + ")");
               map.setView([latitude, longitude], 16);
 
-              // Broadcast koordinat ke semua device yang terhubung
-              broadcastData({
-                id: myUserId,
-                lat: latitude,
-                lng: longitude,
-                accuracy: Math.round(accuracy)
-              });
+              sendLocationUpdate(latitude, longitude, Math.round(accuracy));
 
               status.innerText = "AKTIF (Akurasi: ±" + Math.round(accuracy) + "m)";
               perbaruiDaftarPengguna();
@@ -152,27 +172,15 @@
       }
     }
 
-    function setupConnection(conn) {
-      connections.push(conn);
-      conn.on('data', (data) => {
-        if (data.action === "offline") {
-          if (markers[data.id]) {
-            map.removeLayer(markers[data.id]);
-            delete markers[data.id];
-          }
-          delete activeUsers[data.id];
-        } else {
-          activeUsers[data.id] = { lat: data.lat, lng: data.lng, accuracy: data.accuracy };
-          updateMarker(data.id, data.lat, data.lng, "<b>" + data.id + "</b>");
-        }
-        perbaruiDaftarPengguna();
-      });
-    }
-
-    function broadcastData(data) {
-      connections.forEach(conn => {
-        if (conn.open) conn.send(data);
-      });
+    function sendLocationUpdate(lat, lng, accuracy) {
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish(currentTopic, JSON.stringify({
+          id: myUserId,
+          lat: lat,
+          lng: lng,
+          accuracy: accuracy
+        }));
+      }
     }
 
     function stopTracking() {
@@ -180,9 +188,9 @@
         navigator.geolocation.clearWatch(watchId);
         watchId = null;
       }
-      if (peer) {
-        broadcastData({ id: myUserId, action: "offline" });
-        peer.destroy();
+      if (mqttClient) {
+        mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "offline" }));
+        mqttClient.end();
       }
       if (markers[myUserId]) {
         map.removeLayer(markers[myUserId]);
@@ -234,6 +242,10 @@
         userListEl.appendChild(li);
       });
     }
+
+    window.addEventListener('beforeunload', () => {
+      stopTracking();
+    });
   </script>
 
 </body>
