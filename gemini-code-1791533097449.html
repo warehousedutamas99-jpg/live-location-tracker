@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Live Location - Multi Device</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #111827; color: white; }
+    header { background: #1f2937; padding: 12px 20px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; border-bottom: 1px solid #374151; }
+    .top-bar { display: flex; justify-content: space-between; align-items: center; }
+    .room-bar { display: flex; gap: 8px; align-items: center; }
+    input { padding: 6px 10px; border-radius: 4px; border: 1px solid #4b5563; background: #374151; color: white; }
+    button { background: #10b981; color: white; border: none; padding: 8px 14px; font-weight: bold; border-radius: 6px; cursor: pointer; }
+    button:hover { background: #059669; }
+    button.active { background: #ef4444; }
+    .status-badge { background: #374151; padding: 4px 10px; border-radius: 12px; font-size: 12px; color: #9ca3af; }
+    
+    .container { display: flex; flex: 1; position: relative; }
+    #map { flex: 1; height: 100%; background: #0f172a; }
+    
+    .sidebar { width: 280px; background: #1f2937; border-left: 1px solid #374151; padding: 15px; overflow-y: auto; }
+    .sidebar h3 { font-size: 15px; margin-bottom: 10px; color: #f3f4f6; border-bottom: 1px solid #374151; padding-bottom: 6px; }
+    .user-list { list-style: none; }
+    .user-item { background: #374151; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+    .user-item strong { color: #60a5fa; }
+    .user-item .distance { color: #34d399; font-weight: bold; font-size: 11px; }
+
+    @media (max-width: 600px) {
+      .container { flex-direction: column-reverse; }
+      .sidebar { width: 100%; height: 140px; border-left: none; border-top: 1px solid #374151; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="top-bar">
+      <h2>Live Location Sharing</h2>
+      <span class="status-badge" id="status">Status: SIAP</span>
+    </div>
+    <div class="room-bar">
+      <label style="font-size: 12px;">Kode Ruangan:</label>
+      <input type="text" id="roomId" value="ruang123" style="width: 100px;">
+      <button id="toggleBtn" onclick="toggleTracking()">Bagikan Lokasi Saya</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <div id="map"></div>
+    <div class="sidebar">
+      <h3>Daftar Pengguna Aktif</h3>
+      <ul class="user-list" id="userList">
+        <li style="color: #9ca3af; font-size: 12px;">Klik "Bagikan Lokasi" untuk terhubung...</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- PeerJS JS (Koneksi Lintas Device/Internet) -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+  <script>
+    // 1. Inisialisasi Peta
+    const map = L.map('map').setView([-6.200000, 106.816666], 13);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri'
+    }).addTo(map);
+
+    const myUserId = "User_" + Math.floor(1000 + Math.random() * 9000);
+    const markers = {};
+    const activeUsers = {};
+    let watchId = null;
+    let myCoords = null;
+    let peer = null;
+    const connections = [];
+
+    // 2. Rumus Haversine (Hitung Jarak)
+    function hitungJarak(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distance = R * c;
+
+      return distance < 1 ? Math.round(distance * 1000) + " meter" : distance.toFixed(2) + " km";
+    }
+
+    // 3. Fungsi Mulai/Henti Lintas Device
+    function toggleTracking() {
+      const btn = document.getElementById("toggleBtn");
+      const status = document.getElementById("status");
+      const room = document.getElementById("roomId").value.trim();
+
+      if (watchId === null) {
+        if ("geolocation" in navigator) {
+          status.innerText = "Mencari GPS & Server...";
+
+          // Inisialisasi PeerJS Server
+          peer = new Peer(myUserId + "_" + room);
+
+          peer.on('open', (id) => {
+            status.innerText = "Terhubung ke Server";
+          });
+
+          peer.on('connection', (conn) => {
+            setupConnection(conn);
+          });
+
+          // Mulai Ambil GPS
+          watchId = navigator.geolocation.watchPosition(
+            (position) => {
+              const { latitude, longitude, accuracy } = position.coords;
+              myCoords = { lat: latitude, lng: longitude };
+
+              activeUsers[myUserId] = { lat: latitude, lng: longitude, accuracy: Math.round(accuracy) };
+              updateMarker(myUserId, latitude, longitude, "<b>Lokasi Saya</b>");
+              map.setView([latitude, longitude], 16);
+
+              // Broadcast koordinat ke semua device yang terhubung
+              broadcastData({
+                id: myUserId,
+                lat: latitude,
+                lng: longitude,
+                accuracy: Math.round(accuracy)
+              });
+
+              status.innerText = "AKTIF (Akurasi: ±" + Math.round(accuracy) + "m)";
+              perbaruiDaftarPengguna();
+            },
+            (err) => {
+              alert("Gagal mengambil GPS: " + err.message);
+              stopTracking();
+            },
+            { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+          );
+
+          btn.innerText = "Hentikan Berbagi";
+          btn.classList.add("active");
+        }
+      } else {
+        stopTracking();
+      }
+    }
+
+    function setupConnection(conn) {
+      connections.push(conn);
+      conn.on('data', (data) => {
+        if (data.action === "offline") {
+          if (markers[data.id]) {
+            map.removeLayer(markers[data.id]);
+            delete markers[data.id];
+          }
+          delete activeUsers[data.id];
+        } else {
+          activeUsers[data.id] = { lat: data.lat, lng: data.lng, accuracy: data.accuracy };
+          updateMarker(data.id, data.lat, data.lng, "<b>" + data.id + "</b>");
+        }
+        perbaruiDaftarPengguna();
+      });
+    }
+
+    function broadcastData(data) {
+      connections.forEach(conn => {
+        if (conn.open) conn.send(data);
+      });
+    }
+
+    function stopTracking() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      if (peer) {
+        broadcastData({ id: myUserId, action: "offline" });
+        peer.destroy();
+      }
+      if (markers[myUserId]) {
+        map.removeLayer(markers[myUserId]);
+        delete markers[myUserId];
+      }
+
+      delete activeUsers[myUserId];
+      myCoords = null;
+
+      document.getElementById("toggleBtn").innerText = "Bagikan Lokasi Saya";
+      document.getElementById("toggleBtn").classList.remove("active");
+      document.getElementById("status").innerText = "Status: Nonaktif";
+      perbaruiDaftarPengguna();
+    }
+
+    function updateMarker(id, lat, lng, popupText) {
+      if (markers[id]) {
+        markers[id].setLatLng([lat, lng]);
+      } else {
+        markers[id] = L.marker([lat, lng]).addTo(map).bindPopup(popupText);
+      }
+    }
+
+    function perbaruiDaftarPengguna() {
+      const userListEl = document.getElementById("userList");
+      userListEl.innerHTML = "";
+
+      const keys = Object.keys(activeUsers);
+      if (keys.length === 0) {
+        userListEl.innerHTML = '<li style="color: #9ca3af; font-size: 12px;">Belum ada pengguna aktif...</li>';
+        return;
+      }
+
+      keys.forEach((id) => {
+        const user = activeUsers[id];
+        const isMe = (id === myUserId);
+        
+        let teksJarak = "Posisi Anda";
+        if (!isMe && myCoords) {
+          teksJarak = "Jarak: " + hitungJarak(myCoords.lat, myCoords.lng, user.lat, user.lng);
+        }
+
+        const li = document.createElement("li");
+        li.className = "user-item";
+        li.innerHTML = `
+          <strong>${isMe ? id + ' (Anda)' : id}</strong>
+          <span class="distance">${teksJarak}</span>
+        `;
+        userListEl.appendChild(li);
+      });
+    }
+  </script>
+
+</body>
+</html>
