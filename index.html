@@ -3,82 +3,98 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Location Sharing - Realtime Database</title>
+  <title>Live Location Sharing Professional</title>
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #111827; color: white; }
-    header { background: #1f2937; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 1000; border-bottom: 1px solid #374151; }
-    .status-badge { background: #374151; padding: 6px 12px; border-radius: 12px; font-size: 13px; color: #34d399; font-weight: bold; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #0f172a; color: #f8fafc; }
     
-    .container { display: flex; flex: 1; position: relative; }
-    #map { flex: 1; height: 100%; background: #0f172a; }
+    header { background: #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    .title-container { display: flex; align-items: center; gap: 10px; }
+    .title-container h2 { font-size: 18px; font-weight: 600; color: #f8fafc; }
     
-    .sidebar { width: 280px; background: #1f2937; border-left: 1px solid #374151; padding: 15px; overflow-y: auto; }
-    .sidebar h3 { font-size: 15px; margin-bottom: 10px; color: #f3f4f6; border-bottom: 1px solid #374151; padding-bottom: 6px; }
-    .user-list { list-style: none; }
-    .user-item { background: #374151; padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
-    .user-item strong { color: #60a5fa; }
-    .user-item .distance { color: #34d399; font-weight: bold; font-size: 11px; }
+    .status-badge { background: #334155; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 6px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background-color: #38bdf8; display: inline-block; }
+    .status-dot.active { background-color: #4ade80; box-shadow: 0 0 8px #4ade80; }
+    
+    .container { display: flex; flex: 1; position: relative; overflow: hidden; }
+    #map { flex: 1; height: 100%; background: #020617; }
+    
+    .sidebar { width: 320px; background: #1e293b; border-left: 1px solid #334155; padding: 20px; display: flex; flex-direction: column; gap: 16px; z-index: 500; }
+    .sidebar-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; }
+    .sidebar-header h3 { font-size: 15px; font-weight: 600; color: #f1f5f9; }
+    .user-count { background: #0f172a; padding: 2px 8px; border-radius: 12px; font-size: 11px; color: #94a3b8; }
+    
+    .user-list { list-style: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; }
+    .user-item { background: #0f172a; border: 1px solid #334155; padding: 12px 14px; border-radius: 8px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; transition: all 0.2s; }
+    .user-item:hover { border-color: #475569; }
+    .user-item.is-me { border-left: 4px solid #38bdf8; }
+    .user-item .user-name { font-weight: 600; color: #f8fafc; display: flex; justify-content: space-between; align-items: center; }
+    .user-item .accuracy { font-size: 11px; color: #64748b; }
+    .user-item .distance { color: #4ade80; font-weight: 600; font-size: 12px; margin-top: 2px; }
 
-    @media (max-width: 600px) {
+    @media (max-width: 640px) {
       .container { flex-direction: column-reverse; }
-      .sidebar { width: 100%; height: 150px; border-left: none; border-top: 1px solid #374151; }
+      .sidebar { width: 100%; height: 200px; border-left: none; border-top: 1px solid #334155; }
     }
   </style>
 </head>
 <body>
 
   <header>
-    <h2>Live Location Sharing</h2>
-    <span class="status-badge" id="status">Menghubungkan GPS...</span>
+    <div class="title-container">
+      <h2>Live Location Sharing</h2>
+    </div>
+    <div class="status-badge" id="statusBadge">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">Menghubungkan Server...</span>
+    </div>
   </header>
 
   <div class="container">
     <div id="map"></div>
     <div class="sidebar">
-      <h3>Daftar Pengguna Aktif</h3>
+      <div class="sidebar-header">
+        <h3>Daftar Pengguna Aktif</h3>
+        <span class="user-count" id="userCount">0 Pengguna</span>
+      </div>
       <ul class="user-list" id="userList">
-        <li style="color: #9ca3af; font-size: 12px;">Mencari pengguna aktif...</li>
+        <li style="color: #64748b; font-size: 12px; text-align: center; margin-top: 20px;">Menunggu koneksi pengguna...</li>
       </ul>
     </div>
   </div>
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <!-- Firebase JS SDK (v8) -->
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+  <!-- PubNub SDK (Reliable Realtime Global Broadcast) -->
+  <script src="https://cdn.pubnub.com/sdk/javascript/pubnub.7.2.2.min.js"></script>
 
   <script>
-    // Konfigurasi Database Publik Siap Pakai
-    const firebaseConfig = {
-      databaseURL: "https://location-tracker-demo-default-rtdb.asia-southeast1.firebasedatabase.app/"
-    };
-
-    firebase.initializeApp(firebaseConfig);
-    const database = firebase.database();
-
-    // Inisialisasi Peta
+    // 1. Inisialisasi Peta
     const map = L.map('map').setView([-6.200000, 106.816666], 13);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
       attribution: 'Tiles &copy; Esri'
     }).addTo(map);
 
-    const myUserId = "User_" + Math.floor(1000 + Math.random() * 9000);
+    const myUserId = "Pengguna_" + Math.floor(1000 + Math.random() * 9000);
     const markers = {};
     const activeUsers = {};
-    let watchId = null;
     let myCoords = null;
 
-    const userRef = database.ref('active_locations/' + myUserId);
-    const allLocationsRef = database.ref('active_locations');
+    // 2. Inisialisasi PubNub Realtime Network (Publik Demo Keys)
+    const pubnub = new PubNub({
+      publishKey: "pub-c-b5f7e7f7-5114-411a-821f-f446059c4701",
+      subscribeKey: "sub-c-1a525f0a-6f03-11ec-bf8f-82bfdf1c450d",
+      userId: myUserId
+    });
 
-    // Hitung Jarak (Haversine)
+    const channelName = "live_location_room_global";
+
+    // 3. Rumus Haversine (Jarak Antar Koordinat)
     function hitungJarak(lat1, lon1, lat2, lon2) {
       const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -92,105 +108,143 @@
       return distance < 1 ? Math.round(distance * 1000) + " meter" : distance.toFixed(2) + " km";
     }
 
-    // 1. Ambil Lokasi GPS Otomatis
-    function startTrackingOtomatis() {
+    // 4. Langganan Pesan Realtime
+    pubnub.subscribe({ channels: [channelName] });
+
+    pubnub.addListener({
+      status: (statusEvent) => {
+        if (statusEvent.category === "PNConnectedCategory") {
+          updateStatus("Mencari GPS...", false);
+          startGPS();
+          // Minta pengguna lain mengirim lokasinya
+          pubnub.publish({
+            channel: channelName,
+            message: { id: myUserId, type: "request_sync" }
+          });
+        }
+      },
+      message: (event) => {
+        const msg = event.message;
+
+        if (msg.type === "offline") {
+          removeUser(msg.id);
+        } else if (msg.type === "request_sync") {
+          if (myCoords) sendMyLocation();
+        } else if (msg.id !== myUserId) {
+          activeUsers[msg.id] = { lat: msg.lat, lng: msg.lng, accuracy: msg.accuracy, lastUpdate: Date.now() };
+          updateUserMarker(msg.id, msg.lat, msg.lng, `<b>${msg.id}</b>`);
+          renderUserList();
+        }
+      }
+    });
+
+    // 5. Ambil Lokasi GPS Realtime
+    function startGPS() {
       if ("geolocation" in navigator) {
-        watchId = navigator.geolocation.watchPosition(
-          (position) => {
-            const { latitude, longitude, accuracy } = position.coords;
+        navigator.geolocation.watchPosition(
+          (pos) => {
+            const { latitude, longitude, accuracy } = pos.coords;
             myCoords = { lat: latitude, lng: longitude };
 
-            // Simpan & Update ke Firebase Realtime Database
-            userRef.set({
-              lat: latitude,
-              lng: longitude,
-              accuracy: Math.round(accuracy),
-              lastUpdate: Date.now()
-            });
-
-            userRef.onDisconnect().remove(); // Hapus data otomatis saat tab/browser ditutup
-
-            if (document.getElementById("status").innerText.includes("Menghubungkan")) {
+            activeUsers[myUserId] = { lat: latitude, lng: longitude, accuracy: Math.round(accuracy), lastUpdate: Date.now() };
+            
+            updateUserMarker(myUserId, latitude, longitude, `<b>Lokasi Saya</b> (${myUserId})`);
+            
+            if (document.getElementById("statusText").innerText.includes("Mencari GPS")) {
               map.setView([latitude, longitude], 16);
             }
 
-            document.getElementById("status").innerText = "AKTIF (±" + Math.round(accuracy) + "m)";
+            updateStatus(`AKTIF (±${Math.round(accuracy)}m)`, true);
+            sendMyLocation();
+            renderUserList();
           },
           (err) => {
-            document.getElementById("status").innerText = "GPS Ditolak/Error";
-            alert("Harap izinkan akses lokasi GPS pada browser.");
+            updateStatus("Akses GPS Ditolak", false);
+            alert("Harap izinkan akses lokasi pada browser HP/PC Anda.");
           },
           { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
         );
       }
     }
 
-    // 2. Menerima Perubahan Data Pengguna Secara Realtime dari Firebase
-    allLocationsRef.on('value', (snapshot) => {
-      const data = snapshot.val() || {};
-
-      // Hapus marker user yang offline
-      for (let id in markers) {
-        if (!data[id]) {
-          map.removeLayer(markers[id]);
-          delete markers[id];
-          delete activeUsers[id];
+    function sendMyLocation() {
+      if (!myCoords) return;
+      pubnub.publish({
+        channel: channelName,
+        message: {
+          id: myUserId,
+          lat: myCoords.lat,
+          lng: myCoords.lng,
+          accuracy: activeUsers[myUserId]?.accuracy || 0
         }
+      });
+    }
+
+    function updateUserMarker(id, lat, lng, popupContent) {
+      if (markers[id]) {
+        markers[id].setLatLng([lat, lng]);
+      } else {
+        markers[id] = L.marker([lat, lng]).addTo(map).bindPopup(popupContent);
       }
+    }
 
-      // Perbarui atau tambah marker semua user yang online
-      for (let id in data) {
-        const user = data[id];
-        activeUsers[id] = user;
-
-        const isMe = (id === myUserId);
-        const labelText = isMe ? "<b>Lokasi Saya</b> (" + id + ")" : "<b>" + id + "</b>";
-
-        if (markers[id]) {
-          markers[id].setLatLng([user.lat, user.lng]);
-        } else {
-          markers[id] = L.marker([user.lat, user.lng]).addTo(map).bindPopup(labelText);
-        }
+    function removeUser(id) {
+      if (markers[id]) {
+        map.removeLayer(markers[id]);
+        delete markers[id];
       }
+      delete activeUsers[id];
+      renderUserList();
+    }
 
-      perbaruiDaftarPengguna();
-    });
+    function updateStatus(text, isActive) {
+      document.getElementById("statusText").innerText = text;
+      const dot = document.getElementById("statusDot");
+      if (isActive) dot.classList.add("active");
+      else dot.classList.remove("active");
+    }
 
-    function perbaruiDaftarPengguna() {
-      const userListEl = document.getElementById("userList");
-      userListEl.innerHTML = "";
+    function renderUserList() {
+      const listEl = document.getElementById("userList");
+      const countEl = document.getElementById("userCount");
+      listEl.innerHTML = "";
 
       const keys = Object.keys(activeUsers);
+      countEl.innerText = `${keys.length} Pengguna`;
+
       if (keys.length === 0) {
-        userListEl.innerHTML = '<li style="color: #9ca3af; font-size: 12px;">Mencari pengguna aktif...</li>';
+        listEl.innerHTML = '<li style="color: #64748b; font-size: 12px; text-align: center; margin-top: 20px;">Menunggu koneksi pengguna...</li>';
         return;
       }
 
       keys.forEach((id) => {
         const user = activeUsers[id];
-        const isMe = (id === myUserId);
-        
-        let teksJarak = "Posisi Anda";
+        const isMe = id === myUserId;
+
+        let distanceText = "Posisi Anda";
         if (!isMe && myCoords) {
-          teksJarak = "Jarak: " + hitungJarak(myCoords.lat, myCoords.lng, user.lat, user.lng);
+          distanceText = "Jarak: " + hitungJarak(myCoords.lat, myCoords.lng, user.lat, user.lng);
         }
 
         const li = document.createElement("li");
-        li.className = "user-item";
+        li.className = `user-item ${isMe ? 'is-me' : ''}`;
         li.innerHTML = `
-          <strong>${isMe ? id + ' (Anda)' : id}</strong>
-          <span class="distance">${teksJarak}</span>
+          <div class="user-name">
+            <span>${isMe ? id + ' (Anda)' : id}</span>
+          </div>
+          <div class="accuracy">Akurasi GPS: ±${user.accuracy}m</div>
+          <div class="distance">${distanceText}</div>
         `;
-        userListEl.appendChild(li);
+        listEl.appendChild(li);
       });
     }
 
-    window.onload = () => {
-      startTrackingOtomatis();
-    };
-
+    // Pembersihan saat tab ditutup
     window.addEventListener('beforeunload', () => {
-      userRef.remove();
+      pubnub.publish({
+        channel: channelName,
+        message: { id: myUserId, type: "offline" }
+      });
     });
   </script>
 
