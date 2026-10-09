@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Location Sharing - Multi Device</title>
+  <title>Live Location Sharing - Otomatis</title>
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -11,14 +11,8 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #111827; color: white; }
-    header { background: #1f2937; padding: 12px 20px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; border-bottom: 1px solid #374151; }
-    .top-bar { display: flex; justify-content: space-between; align-items: center; }
-    .room-bar { display: flex; gap: 8px; align-items: center; }
-    input { padding: 6px 10px; border-radius: 4px; border: 1px solid #4b5563; background: #374151; color: white; }
-    button { background: #10b981; color: white; border: none; padding: 8px 14px; font-weight: bold; border-radius: 6px; cursor: pointer; }
-    button:hover { background: #059669; }
-    button.active { background: #ef4444; }
-    .status-badge { background: #374151; padding: 4px 10px; border-radius: 12px; font-size: 12px; color: #9ca3af; }
+    header { background: #1f2937; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; z-index: 1000; border-bottom: 1px solid #374151; }
+    .status-badge { background: #374151; padding: 6px 12px; border-radius: 12px; font-size: 13px; color: #34d399; font-weight: bold; }
     
     .container { display: flex; flex: 1; position: relative; }
     #map { flex: 1; height: 100%; background: #0f172a; }
@@ -32,22 +26,15 @@
 
     @media (max-width: 600px) {
       .container { flex-direction: column-reverse; }
-      .sidebar { width: 100%; height: 140px; border-left: none; border-top: 1px solid #374151; }
+      .sidebar { width: 100%; height: 150px; border-left: none; border-top: 1px solid #374151; }
     }
   </style>
 </head>
 <body>
 
   <header>
-    <div class="top-bar">
-      <h2>Live Location Sharing</h2>
-      <span class="status-badge" id="status">Status: Nonaktif</span>
-    </div>
-    <div class="room-bar">
-      <label style="font-size: 12px;">Kode Ruangan:</label>
-      <input type="text" id="roomId" value="ruang123" style="width: 100px;">
-      <button id="toggleBtn" onclick="toggleTracking()">Bagikan Lokasi Saya</button>
-    </div>
+    <h2>Live Location Sharing</h2>
+    <span class="status-badge" id="status">Menghubungkan GPS...</span>
   </header>
 
   <div class="container">
@@ -55,7 +42,7 @@
     <div class="sidebar">
       <h3>Daftar Pengguna Aktif</h3>
       <ul class="user-list" id="userList">
-        <li style="color: #9ca3af; font-size: 12px;">Klik "Bagikan Lokasi" untuk bergabung...</li>
+        <li style="color: #9ca3af; font-size: 12px;">Mencari pengguna aktif...</li>
       </ul>
     </div>
   </div>
@@ -66,20 +53,25 @@
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
   <script>
+    // 1. Inisialisasi Peta
     const map = L.map('map').setView([-6.200000, 106.816666], 13);
     L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
       attribution: 'Tiles &copy; Esri'
     }).addTo(map);
 
+    // ID Unik Otomatis untuk setiap user yang buka link
     const myUserId = "User_" + Math.floor(1000 + Math.random() * 9000);
     const markers = {};
     const activeUsers = {};
     let watchId = null;
     let myCoords = null;
-    let mqttClient = null;
-    let currentTopic = "";
+    
+    // Topik umum agar semua orang yang buka link ini otomatis masuk ke tempat yang sama
+    const currentTopic = "live_gps_tracker_global_room_v1";
+    const mqttClient = mqtt.connect('wss://broker.hivemq.com:8000/mqtt');
 
+    // 2. Rumus Hitung Jarak (Haversine)
     function hitungJarak(lat1, lon1, lat2, lon2) {
       const R = 6371;
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -93,74 +85,67 @@
       return distance < 1 ? Math.round(distance * 1000) + " meter" : distance.toFixed(2) + " km";
     }
 
-    function toggleTracking() {
-      const btn = document.getElementById("toggleBtn");
-      const status = document.getElementById("status");
-      const room = document.getElementById("roomId").value.trim() || "ruang123";
+    // 3. Sambungkan ke Server MQTT
+    mqttClient.on('connect', () => {
+      document.getElementById("status").innerText = "Terhubung ke Server";
+      mqttClient.subscribe(currentTopic);
+      // Panggil user lain agar langsung lapor balik posisi mereka
+      mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "ping" }));
+    });
 
-      if (watchId === null) {
-        if ("geolocation" in navigator) {
-          status.innerText = "Mencari GPS & Server...";
+    mqttClient.on('message', (topic, message) => {
+      try {
+        const data = JSON.parse(message.toString());
 
-          currentTopic = "live_gps_tracker_room_" + room;
-          mqttClient = mqtt.connect('wss://broker.hivemq.com:8000/mqtt');
-
-          mqttClient.on('connect', () => {
-            status.innerText = "Terhubung ke Server";
-            mqttClient.subscribe(currentTopic);
-            mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "ping" }));
-          });
-
-          mqttClient.on('message', (topic, message) => {
-            try {
-              const data = JSON.parse(message.toString());
-
-              if (data.action === "offline") {
-                if (markers[data.id]) {
-                  map.removeLayer(markers[data.id]);
-                  delete markers[data.id];
-                }
-                delete activeUsers[data.id];
-              } else if (data.action === "ping") {
-                if (myCoords) {
-                  sendLocationUpdate(myCoords.lat, myCoords.lng, activeUsers[myUserId]?.accuracy || 10);
-                }
-              } else if (data.id !== myUserId) {
-                activeUsers[data.id] = { lat: data.lat, lng: data.lng, accuracy: data.accuracy };
-                updateMarker(data.id, data.lat, data.lng, "<b>" + data.id + "</b>");
-              }
-              perbaruiDaftarPengguna();
-            } catch (e) {
-              console.error(e);
-            }
-          });
-
-          watchId = navigator.geolocation.watchPosition(
-            (position) => {
-              const { latitude, longitude, accuracy } = position.coords;
-              myCoords = { lat: latitude, lng: longitude };
-
-              activeUsers[myUserId] = { lat: latitude, lng: longitude, accuracy: Math.round(accuracy) };
-              updateMarker(myUserId, latitude, longitude, "<b>Lokasi Saya</b> (" + myUserId + ")");
-              map.setView([latitude, longitude], 16);
-
-              sendLocationUpdate(latitude, longitude, Math.round(accuracy));
-
-              status.innerText = "AKTIF (Akurasi: ±" + Math.round(accuracy) + "m)";
-              perbaruiDaftarPengguna();
-            },
-            (err) => {
-              alert("Gagal mengambil GPS: " + err.message);
-              stopTracking();
-            },
-            { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-          );
-
-          btn.innerText = "Hentikan Berbagi";
-          btn.classList.add("active");
+        if (data.action === "offline") {
+          if (markers[data.id]) {
+            map.removeLayer(markers[data.id]);
+            delete markers[data.id];
+          }
+          delete activeUsers[data.id];
+        } else if (data.action === "ping") {
+          // Jika ada user baru masuk, langsung kirimkan posisi kita sekarang ke dia
+          if (myCoords) {
+            sendLocationUpdate(myCoords.lat, myCoords.lng, activeUsers[myUserId]?.accuracy || 10);
+          }
+        } else if (data.id !== myUserId) {
+          activeUsers[data.id] = { lat: data.lat, lng: data.lng, accuracy: data.accuracy };
+          updateMarker(data.id, data.lat, data.lng, "<b>" + data.id + "</b>");
         }
+        perbaruiDaftarPengguna();
+      } catch (e) {
+        console.error(e);
+      }
+    });
+
+    // 4. OTOMATIS JALANKAN LOKASI SAAT HALAMAN DIBUKA
+    function startTrackingOtomatis() {
+      if ("geolocation" in navigator) {
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const { latitude, longitude, accuracy } = position.coords;
+            myCoords = { lat: latitude, lng: longitude };
+
+            activeUsers[myUserId] = { lat: latitude, lng: longitude, accuracy: Math.round(accuracy) };
+            updateMarker(myUserId, latitude, longitude, "<b>Lokasi Saya</b> (" + myUserId + ")");
+            
+            // Fokuskan peta ke posisi user pertama kali
+            if (document.getElementById("status").innerText.includes("Menghubungkan")) {
+              map.setView([latitude, longitude], 16);
+            }
+
+            sendLocationUpdate(latitude, longitude, Math.round(accuracy));
+            document.getElementById("status").innerText = "AKTIF (±" + Math.round(accuracy) + "m)";
+            perbaruiDaftarPengguna();
+          },
+          (err) => {
+            document.getElementById("status").innerText = "Gagal Akses GPS";
+            alert("Izinkan akses lokasi/GPS di browser HP Anda agar fitur ini berfungsi.");
+          },
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+        );
       } else {
-        stopTracking();
+        alert("Browser tidak mendukung lokasi.");
       }
     }
 
@@ -173,29 +158,6 @@
           accuracy: accuracy
         }));
       }
-    }
-
-    function stopTracking() {
-      if (watchId !== null) {
-        navigator.geolocation.clearWatch(watchId);
-        watchId = null;
-      }
-      if (mqttClient) {
-        mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "offline" }));
-        mqttClient.end();
-      }
-      if (markers[myUserId]) {
-        map.removeLayer(markers[myUserId]);
-        delete markers[myUserId];
-      }
-
-      delete activeUsers[myUserId];
-      myCoords = null;
-
-      document.getElementById("toggleBtn").innerText = "Bagikan Lokasi Saya";
-      document.getElementById("toggleBtn").classList.remove("active");
-      document.getElementById("status").innerText = "Status: Nonaktif";
-      perbaruiDaftarPengguna();
     }
 
     function updateMarker(id, lat, lng, popupText) {
@@ -212,7 +174,7 @@
 
       const keys = Object.keys(activeUsers);
       if (keys.length === 0) {
-        userListEl.innerHTML = '<li style="color: #9ca3af; font-size: 12px;">Belum ada pengguna aktif...</li>';
+        userListEl.innerHTML = '<li style="color: #9ca3af; font-size: 12px;">Mencari pengguna aktif...</li>';
         return;
       }
 
@@ -235,8 +197,16 @@
       });
     }
 
+    // Jalankan pelacakan otomatis begitu halaman selesai dimuat
+    window.onload = () => {
+      startTrackingOtomatis();
+    };
+
+    // Laporkan status offline saat tab ditutup
     window.addEventListener('beforeunload', () => {
-      stopTracking();
+      if (mqttClient) {
+        mqttClient.publish(currentTopic, JSON.stringify({ id: myUserId, action: "offline" }));
+      }
     });
   </script>
 
