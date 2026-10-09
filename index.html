@@ -69,161 +69,205 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <script>
-    // Database URL Publik Siap Pakai
+    // Semua pengguna harus memakai endpoint Realtime Database yang SAMA.
+    // Jika database/rules berbeda, lokasi tidak dapat dibagikan antarperangkat.
     const DB_URL = "https://live-tracker-default-rtdb.asia-southeast1.firebasedatabase.app/users";
+    const ACTIVE_MS = 45000;
+    const SYNC_MS = 3000;
 
     const map = L.map('map').setView([-6.200000, 106.816666], 13);
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
-      attribution: 'Tiles &copy; Esri'
+      attribution: '&copy; OpenStreetMap contributors'
     }).addTo(map);
 
-    const myUserId = "User_" + Math.floor(1000 + Math.random() * 9000);
-    const markers = {};
+    // ID unik per tab/perangkat; jangan memakai ID acak baru setiap pembaruan lokasi.
+    const myUserId = 'User_' + (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) :
+      Math.random().toString(36).slice(2, 10));
+    const markers = Object.create(null);
     let activeUsers = {};
     let myCoords = null;
+    let firstFix = true;
+    let lastWriteError = '';
+
+    function validUser(user) {
+      return user && Number.isFinite(Number(user.lat)) &&
+        Number.isFinite(Number(user.lng)) &&
+        Number(user.lat) >= -90 && Number(user.lat) <= 90 &&
+        Number(user.lng) >= -180 && Number(user.lng) <= 180 &&
+        Number.isFinite(Number(user.updatedAt));
+    }
 
     function hitungJarak(lat1, lon1, lat2, lon2) {
+      const values = [lat1, lon1, lat2, lon2].map(Number);
+      if (!values.every(Number.isFinite)) return 'Belum tersedia';
+      const [aLat, aLon, bLat, bLon] = values;
       const R = 6371;
-      const dLat = (lat2 - lat1) * Math.PI / 180;
-      const dLon = (lon2 - lon1) * Math.PI / 180;
-      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const distance = R * c;
-
-      return distance < 1 ? Math.round(distance * 1000) + " meter" : distance.toFixed(2) + " km";
+      const dLat = (bLat - aLat) * Math.PI / 180;
+      const dLon = (bLon - aLon) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) *
+        Math.sin(dLon / 2) ** 2;
+      const distance = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return distance < 1 ? Math.round(distance * 1000) + ' meter' : distance.toFixed(2) + ' km';
     }
 
-    // 1. Kirim Lokasi Kita ke Server
-    function updateLokasiSaya(lat, lng, accuracy) {
-      const data = {
-        lat: lat,
-        lng: lng,
-        accuracy: accuracy,
-        updatedAt: Date.now()
-      };
-
-      fetch(`${DB_URL}/${myUserId}.json`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
-      });
-    }
-
-    // 2. Ambil Semua Lokasi User yang Aktif
-    function syncSemuaUser() {
-      fetch(`${DB_URL}.json`)
-        .then(res => res.json())
-        .then(data => {
-          if (!data) data = {};
-          activeUsers = data;
-
-          const sekarang = Date.now();
-          const activeIds = Object.keys(data);
-
-          // Hapus user yang sudah tidak aktif (> 30 detik)
-          for (let id in markers) {
-            if (!data[id] || (sekarang - data[id].updatedAt > 30000)) {
-              map.removeLayer(markers[id]);
-              delete markers[id];
-              delete activeUsers[id];
-            }
-          }
-
-          // Update marker di peta
-          Object.keys(activeUsers).forEach(id => {
-            const user = activeUsers[id];
-            if (sekarang - user.updatedAt <= 30000) { // Hanya yang aktif kurang dari 30 detik
-              const isMe = id === myUserId;
-              const popup = isMe ? `<b>Lokasi Saya</b> (${id})` : `<b>${id}</b>`;
-
-              if (markers[id]) {
-                markers[id].setLatLng([user.lat, user.lng]);
-              } else {
-                markers[id] = L.marker([user.lat, user.lng]).addTo(map).bindPopup(popup);
-              }
-            }
-          });
-
-          renderUserList();
+    async function updateLokasiSaya(lat, lng, accuracy) {
+      const data = { lat, lng, accuracy, updatedAt: Date.now(), userAgent: 'web' };
+      try {
+        const res = await fetch(`${DB_URL}/${encodeURIComponent(myUserId)}.json`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+          cache: 'no-store'
         });
+        if (!res.ok) throw new Error(`Database menolak penyimpanan (HTTP ${res.status})`);
+        lastWriteError = '';
+      } catch (err) {
+        lastWriteError = err.message || 'Tidak dapat menyimpan lokasi';
+        updateStatus('Database error', false);
+      }
     }
 
-    // 3. Jalankan GPS Realtime
-    function startGPS() {
-      if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(
-          (pos) => {
-            const { latitude, longitude, accuracy } = pos.coords;
-            myCoords = { lat: latitude, lng: longitude };
+    async function syncSemuaUser() {
+      try {
+        const res = await fetch(`${DB_URL}.json`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const now = Date.now();
+        activeUsers = {};
 
-            updateStatus(`AKTIF (±${Math.round(accuracy)}m)`, true);
+        if (data && typeof data === 'object') {
+          for (const [id, user] of Object.entries(data)) {
+            // Abaikan data lama/rusak seperti "error", undefined, atau NaN.
+            if (!validUser(user)) continue;
+            if (now - Number(user.updatedAt) > ACTIVE_MS) continue;
+            activeUsers[id] = user;
+          }
+        }
 
-            if (document.getElementById("statusText").innerText.includes("Mencari GPS")) {
-              map.setView([latitude, longitude], 16);
-            }
+        for (const id of Object.keys(markers)) {
+          if (!activeUsers[id]) {
+            map.removeLayer(markers[id]);
+            delete markers[id];
+          }
+        }
 
-            updateLokasiSaya(latitude, longitude, Math.round(accuracy));
-            syncSemuaUser();
-          },
-          (err) => {
-            updateStatus("GPS Ditolak/Error", false);
-            alert("Harap izinkan akses GPS di browser HP/PC Anda.");
-          },
-          { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
-        );
+        for (const [id, user] of Object.entries(activeUsers)) {
+          const point = [Number(user.lat), Number(user.lng)];
+          const isMe = id === myUserId;
+          const popup = isMe ? `<b>Lokasi Anda</b><br>${id}` : `<b>${id}</b>`;
+          if (markers[id]) {
+            markers[id].setLatLng(point);
+            markers[id].setPopupContent(popup);
+          } else {
+            markers[id] = L.marker(point).addTo(map).bindPopup(popup);
+          }
+        }
+        renderUserList();
+        if (lastWriteError) updateStatus('Gagal menyimpan lokasi', false);
+      } catch (err) {
+        updateStatus('Database tidak terhubung', false);
+        const list = document.getElementById('userList');
+        list.innerHTML = '';
+        const li = document.createElement('li');
+        li.className = 'user-item';
+        li.textContent = 'Tidak dapat membaca database. Periksa URL Realtime Database dan Rules Firebase. Detail: ' + (err.message || err);
+        list.appendChild(li);
+        document.getElementById('userCount').textContent = 'Koneksi gagal';
       }
+    }
+
+    function startGPS() {
+      if (!('geolocation' in navigator)) {
+        updateStatus('GPS tidak didukung', false);
+        alert('Browser ini tidak mendukung GPS.');
+        return;
+      }
+      if (!window.isSecureContext) {
+        updateStatus('Perlu HTTPS', false);
+        alert('Akses lokasi memerlukan HTTPS. Buka link website https:// atau localhost.');
+        return;
+      }
+      updateStatus('Meminta izin GPS...', false);
+      navigator.geolocation.watchPosition(async (pos) => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        myCoords = { lat: latitude, lng: longitude };
+        updateStatus(`AKTIF (±${Math.round(accuracy)}m)`, true);
+        if (firstFix) {
+          map.setView([latitude, longitude], 16);
+          firstFix = false;
+        }
+        await updateLokasiSaya(latitude, longitude, Math.round(accuracy));
+        await syncSemuaUser();
+      }, (err) => {
+        const messages = {
+          1: 'Izin GPS ditolak',
+          2: 'Lokasi tidak tersedia',
+          3: 'GPS timeout'
+        };
+        updateStatus(messages[err.code] || 'GPS error', false);
+        alert((messages[err.code] || 'GPS gagal') + '. Izinkan akses lokasi pada browser dan coba lagi.');
+      }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
     }
 
     function updateStatus(text, isActive) {
-      document.getElementById("statusText").innerText = text;
-      const dot = document.getElementById("statusDot");
-      if (isActive) dot.classList.add("active");
-      else dot.classList.remove("active");
+      document.getElementById('statusText').textContent = text;
+      const dot = document.getElementById('statusDot');
+      dot.classList.toggle('active', Boolean(isActive));
     }
 
     function renderUserList() {
-      const listEl = document.getElementById("userList");
-      const countEl = document.getElementById("userCount");
-      listEl.innerHTML = "";
+      const listEl = document.getElementById('userList');
+      const countEl = document.getElementById('userCount');
+      listEl.innerHTML = '';
+      const entries = Object.entries(activeUsers);
+      countEl.textContent = `${entries.length} Pengguna`;
 
-      const keys = Object.keys(activeUsers);
-      countEl.innerText = `${keys.length} Pengguna`;
-
-      if (keys.length === 0) {
-        listEl.innerHTML = '<li style="color: #64748b; font-size: 12px; text-align: center; margin-top: 20px;">Menunggu koneksi pengguna...</li>';
+      if (!entries.length) {
+        const li = document.createElement('li');
+        li.style.cssText = 'color:#94a3b8;font-size:12px;text-align:center;margin-top:20px;';
+        li.textContent = 'Menunggu pengguna lain membuka link dan mengizinkan GPS...';
+        listEl.appendChild(li);
         return;
       }
 
-      keys.forEach((id) => {
-        const user = activeUsers[id];
+      entries.sort(([a], [b]) => (a === myUserId ? -1 : b === myUserId ? 1 : 0));
+      for (const [id, user] of entries) {
         const isMe = id === myUserId;
-
-        let distanceText = "Posisi Anda";
-        if (!isMe && myCoords) {
-          distanceText = "Jarak: " + hitungJarak(myCoords.lat, myCoords.lng, user.lat, user.lng);
-        }
-
-        const li = document.createElement("li");
+        const li = document.createElement('li');
         li.className = `user-item ${isMe ? 'is-me' : ''}`;
-        li.innerHTML = `
-          <div class="user-name">${isMe ? id + ' (Anda)' : id}</div>
-          <div class="accuracy">Akurasi GPS: ±${user.accuracy}m</div>
-          <div class="distance">${distanceText}</div>
-        `;
+        const name = document.createElement('div');
+        name.className = 'user-name';
+        name.textContent = isMe ? `${id} (Anda)` : id;
+        const accuracy = document.createElement('div');
+        accuracy.className = 'accuracy';
+        accuracy.textContent = `Akurasi GPS: ±${Math.round(Number(user.accuracy) || 0)}m`;
+        const distance = document.createElement('div');
+        distance.className = 'distance';
+        distance.textContent = isMe ? 'Posisi Anda' :
+          (myCoords ? 'Jarak: ' + hitungJarak(myCoords.lat, myCoords.lng, user.lat, user.lng) : 'Menghitung jarak...');
+        li.append(name, accuracy, distance);
+        li.addEventListener('click', () => {
+          map.setView([Number(user.lat), Number(user.lng)], 16);
+          if (markers[id]) markers[id].openPopup();
+        });
         listEl.appendChild(li);
-      });
+      }
     }
 
-    // Jalankan Sinkronisasi setiap 3 detik
+    // Polling juga berjalan saat GPS tidak mengirim perubahan posisi.
     startGPS();
-    setInterval(syncSemuaUser, 3000);
+    syncSemuaUser();
+    setInterval(syncSemuaUser, SYNC_MS);
 
-    // Hapus data saat tab ditutup
-    window.addEventListener('beforeunload', () => {
-      fetch(`${DB_URL}/${myUserId}.json`, { method: 'DELETE' });
+    // Jangan hapus data saat tab ditutup: beforeunload sering dibatalkan browser.
+    // Data otomatis dianggap tidak aktif setelah ACTIVE_MS tanpa heartbeat.
+    window.addEventListener('pagehide', () => {
+      try {
+        navigator.sendBeacon(`${DB_URL}/${encodeURIComponent(myUserId)}.json`,
+          new Blob(['null'], { type: 'application/json' }));
+      } catch (_) {}
     });
   </script>
 
