@@ -71,7 +71,37 @@
   <script>
     // Semua pengguna harus memakai endpoint Realtime Database yang SAMA.
     // Jika database/rules berbeda, lokasi tidak dapat dibagikan antarperangkat.
-    const DB_URL = "https://live-tracker-default-rtdb.asia-southeast1.firebasedatabase.app/users";
+    // GitHub Pages hanya meng-host HTML. Sinkronisasi antarperangkat memerlukan
+    // Firebase Realtime Database yang benar dan sama pada semua perangkat.
+    // Masukkan URL database dari Firebase Console (contoh format: https://NAMA-DB.REGION.firebasedatabase.app).
+    function getDatabaseBaseUrl() {
+      const key = 'liveLocationFirebaseDatabaseUrl';
+      let saved = '';
+      try { saved = localStorage.getItem(key) || ''; } catch (_) {}
+      if (!saved) {
+        saved = prompt(
+          'Masukkan URL Firebase Realtime Database Anda.\\n' +
+          'Ambil URL dari Firebase Console > Build > Realtime Database.\\n' +
+          'Jangan masukkan /users atau .json di akhir URL.'
+        ) || '';
+      }
+      saved = saved.trim().replace(/\/+$/, '').replace(/\/users(?:\.json)?$/, '');
+      if (saved && /^https:\/\//i.test(saved)) {
+        try { localStorage.setItem(key, saved); } catch (_) {}
+        return saved + '/users';
+      }
+      return '';
+    }
+    const DB_URL = getDatabaseBaseUrl();
+    if (!DB_URL) {
+      updateStatus('URL Firebase belum diatur', false);
+      const list = document.getElementById('userList');
+      list.innerHTML = '';
+      const li = document.createElement('li');
+      li.className = 'user-item';
+      li.textContent = 'URL Firebase belum diatur. Muat ulang halaman lalu masukkan URL Realtime Database yang benar.';
+      list.appendChild(li);
+    }
     const ACTIVE_MS = 45000;
     const SYNC_MS = 3000;
 
@@ -113,6 +143,7 @@
     }
 
     async function updateLokasiSaya(lat, lng, accuracy) {
+      if (!DB_URL) return;
       const data = { lat, lng, accuracy, updatedAt: Date.now(), userAgent: 'web' };
       try {
         const res = await fetch(`${DB_URL}/${encodeURIComponent(myUserId)}.json`, {
@@ -130,6 +161,7 @@
     }
 
     async function syncSemuaUser() {
+      if (!DB_URL) return;
       try {
         const res = await fetch(`${DB_URL}.json`, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -257,14 +289,17 @@
     }
 
     // Polling juga berjalan saat GPS tidak mengirim perubahan posisi.
-    startGPS();
-    syncSemuaUser();
-    setInterval(syncSemuaUser, SYNC_MS);
+    if (DB_URL) {
+      startGPS();
+      syncSemuaUser();
+      setInterval(syncSemuaUser, SYNC_MS);
+    }
 
     // Jangan hapus data saat tab ditutup: beforeunload sering dibatalkan browser.
     // Data otomatis dianggap tidak aktif setelah ACTIVE_MS tanpa heartbeat.
     window.addEventListener('pagehide', () => {
       try {
+        if (!DB_URL) return;
         navigator.sendBeacon(`${DB_URL}/${encodeURIComponent(myUserId)}.json`,
           new Blob(['null'], { type: 'application/json' }));
       } catch (_) {}
