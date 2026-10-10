@@ -3,306 +3,782 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Location Sharing - Realtime</title>
+  <title>Live Location Sharing & Chat - Google Maps Style</title>
 
   <!-- Leaflet CSS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #0f172a; color: #f8fafc; }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; height: 100vh; background-color: #111827; color: white; }
+    header { background: #1f2937; padding: 12px 20px; display: flex; flex-direction: column; gap: 8px; z-index: 1000; border-bottom: 1px solid #374151; }
+    .top-bar { display: flex; justify-content: space-between; align-items: center; }
+    .room-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input { padding: 6px 10px; border-radius: 4px; border: 1px solid #4b5563; background: #374151; color: white; outline: none; }
+    input:focus { border-color: #10b981; }
+    button { background: #10b981; color: white; border: none; padding: 8px 14px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #059669; }
+    button.active { background: #ef4444; }
+    button.active:hover { background: #dc2626; }
+    .status-badge { background: #374151; padding: 4px 10px; border-radius: 12px; font-size: 12px; color: #9ca3af; }
     
-    header { background: #1e293b; padding: 14px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
-    .title-container h2 { font-size: 18px; font-weight: 600; color: #f8fafc; }
-    
-    .status-badge { background: #334155; padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 6px; }
-    .status-dot { width: 8px; height: 8px; border-radius: 50%; background-color: #ef4444; display: inline-block; }
-    .status-dot.active { background-color: #22c55e; box-shadow: 0 0 8px #22c55e; }
-    
-    .container { display: flex; flex: 1; position: relative; overflow: hidden; }
-    #map { flex: 1; height: 100%; background: #020617; }
-    
-    .sidebar { width: 320px; background: #1e293b; border-left: 1px solid #334155; padding: 20px; display: flex; flex-direction: column; gap: 16px; z-index: 500; }
-    .sidebar-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; }
-    .sidebar-header h3 { font-size: 15px; font-weight: 600; color: #f1f5f9; }
-    .user-count { background: #0f172a; padding: 2px 8px; border-radius: 12px; font-size: 11px; color: #94a3b8; }
-    
-    .user-list { list-style: none; display: flex; flex-direction: column; gap: 10px; overflow-y: auto; flex: 1; }
-    .user-item { background: #0f172a; border: 1px solid #334155; padding: 12px 14px; border-radius: 8px; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
-    .user-item.is-me { border-left: 4px solid #38bdf8; }
-    .user-item .user-name { font-weight: 600; color: #f8fafc; }
-    .user-item .accuracy { font-size: 11px; color: #64748b; }
-    .user-item .distance { color: #22c55e; font-weight: 600; font-size: 12px; margin-top: 2px; }
+    /* Profil Bar Style */
+    .profile-bar { display: flex; gap: 10px; align-items: center; background: #111827; padding: 8px 12px; border-radius: 6px; border: 1px solid #374151; font-size: 12px; margin-bottom: 4px; }
+    .profile-bar img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; border: 2px solid #10b981; }
+    .profile-bar input[type="file"] { display: none; }
+    .upload-label { background: #374151; padding: 5px 10px; border-radius: 4px; cursor: pointer; border: 1px solid #4b5563; }
+    .upload-label:hover { background: #4b5563; }
 
-    @media (max-width: 640px) {
+    .container { display: flex; flex: 1; position: relative; overflow: hidden; }
+    #map { flex: 1; height: 100%; background: #0f172a; z-index: 1; }
+    
+    /* Sidebar Layout */
+    .sidebar { width: 340px; background: #1f2937; border-left: 1px solid #374151; display: flex; flex-direction: column; z-index: 2; }
+    .section-box { padding: 12px 15px; border-bottom: 1px solid #374151; }
+    .section-box h3 { font-size: 14px; margin-bottom: 8px; color: #f3f4f6; display: flex; justify-content: space-between; align-items: center; }
+    
+    /* User List */
+    .user-list { list-style: none; max-height: 160px; overflow-y: auto; }
+    .user-item { background: #374151; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; font-size: 12px; display: flex; align-items: center; gap: 8px; border-left: 4px solid #10b981; cursor: pointer; transition: background 0.2s; }
+    .user-item:hover { background: #4b5563; }
+    .user-item.is-me { border-left-color: #60a5fa; cursor: default; }
+    .user-avatar-sm { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; border: 1px solid #fff; flex-shrink: 0; background: #4b5563; }
+    .user-info-text { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow: hidden; }
+    .user-item strong { color: #f3f4f6; display: flex; justify-content: space-between; }
+    .user-item .distance { color: #34d399; font-weight: 600; }
+
+    /* Route Panel Style */
+    .route-panel { padding: 12px 15px; border-bottom: 1px solid #374151; background: #1a2230; display: flex; flex-direction: column; gap: 10px; }
+    .route-header { display: flex; justify-content: space-between; align-items: center; }
+    .route-modes { display: flex; justify-content: space-around; background: #111827; padding: 6px; border-radius: 6px; border: 1px solid #374151; }
+    .mode-btn { background: transparent; border: none; color: #9ca3af; font-size: 14px; padding: 6px 10px; border-radius: 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+    .mode-btn span { font-size: 10px; }
+    .mode-btn.active { color: #10b981; background: #1f2937; }
+    .route-inputs { display: flex; flex-direction: column; gap: 6px; background: #111827; padding: 8px; border-radius: 6px; border: 1px solid #374151; font-size: 12px; }
+    .route-input-row { display: flex; align-items: center; gap: 8px; color: #d1d5db; }
+    .route-input-row i { width: 14px; text-align: center; }
+    .route-summary-box { background: #111827; padding: 10px; border-radius: 6px; border-left: 4px solid #f59e0b; font-size: 12px; display: flex; flex-direction: column; gap: 4px; }
+    .route-summary-title { font-weight: bold; color: #f3f4f6; display: flex; justify-content: space-between; }
+
+    /* Custom Map Marker Icon */
+    .custom-marker-pin {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 3px solid #10b981;
+      background: #fff;
+      overflow: hidden;
+      box-shadow: 0 3px 6px rgba(0,0,0,0.4);
+    }
+    .custom-marker-pin.is-me { border-color: #60a5fa; }
+    .custom-marker-pin img { width: 100%; height: 100%; object-fit: cover; }
+
+    /* Chat Room Styling */
+    .chat-container { flex: 1; display: flex; flex-direction: column; padding: 10px 15px; overflow: hidden; }
+    .chat-messages { flex: 1; background: #111827; border: 1px solid #374151; border-radius: 6px; padding: 8px; overflow-y: auto; font-size: 12px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+    .chat-msg { background: #374151; padding: 6px 8px; border-radius: 4px; word-break: break-word; }
+    .chat-msg span.sender { font-weight: bold; color: #60a5fa; display: block; font-size: 11px; margin-bottom: 2px; }
+    .chat-input-area { display: flex; gap: 6px; }
+    .chat-input-area input { flex: 1; font-size: 12px; padding: 6px; }
+    .chat-input-area button { padding: 6px 10px; font-size: 12px; }
+
+    /* Modal / Popup Pilih Device */
+    #deviceModal {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(17, 24, 39, 0.95);
+      z-index: 9999;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+    }
+    .modal-content {
+      background: #1f2937;
+      border: 1px solid #374151;
+      padding: 30px;
+      border-radius: 12px;
+      text-align: center;
+      max-width: 400px;
+      width: 100%;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+    .modal-content h2 { font-size: 20px; margin-bottom: 10px; color: #f3f4f6; }
+    .modal-content p { font-size: 13px; color: #9ca3af; margin-bottom: 25px; }
+    .device-options {
+      display: flex;
+      gap: 15px;
+      justify-content: center;
+    }
+    .device-btn {
+      flex: 1;
+      background: #374151;
+      border: 2px solid #4b5563;
+      border-radius: 8px;
+      padding: 20px 10px;
+      cursor: pointer;
+      color: white;
+      transition: all 0.2s;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+    .device-btn i { font-size: 28px; color: #10b981; }
+    .device-btn:hover { background: #4b5563; border-color: #10b981; transform: translateY(-2px); }
+    .device-btn span { font-size: 14px; font-weight: bold; }
+
+    /* Dynamic Mode Class for Layout Override */
+    body.mode-mobile .container { flex-direction: column-reverse; }
+    body.mode-mobile .sidebar { width: 100%; height: 330px; border-left: none; border-top: 1px solid #374151; }
+
+    body.mode-desktop .container { flex-direction: row; }
+    body.mode-desktop .sidebar { width: 340px; height: 100%; border-top: none; border-left: 1px solid #374151; }
+
+    @media (max-width: 768px) {
+      /* Default fallback jika belum dipilih */
       .container { flex-direction: column-reverse; }
-      .sidebar { width: 100%; height: 200px; border-left: none; border-top: 1px solid #334155; }
+      .sidebar { width: 100%; height: 330px; border-left: none; border-top: 1px solid #374151; }
     }
   </style>
 </head>
-<body>
+<body class="mode-desktop">
+
+  <!-- MODAL PILIH DEVICE -->
+  <div id="deviceModal">
+    <div class="modal-content">
+      <h2>Pilih Mode Tampilan</h2>
+      <p>Silakan pilih jenis perangkat yang Anda gunakan saat ini agar tata letak peta dan panel optimal:</p>
+      <div class="device-options">
+        <button class="device-btn" onclick="pilihMode('desktop')">
+          <i class="fa-solid fa-desktop"></i>
+          <span>PC / Desktop</span>
+        </button>
+        <button class="device-btn" onclick="pilihMode('mobile')">
+          <i class="fa-solid fa-mobile-screen-button"></i>
+          <span>Smartphone</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <header>
-    <div class="title-container">
-      <h2>Live Location Sharing</h2>
+    <div class="top-bar">
+      <h2>Live Location & Chat</h2>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button onclick="ubahModeDevice()" style="background: #374151; font-size: 11px; padding: 4px 8px; border: 1px solid #4b5563;" title="Ganti Mode Tampilan"><i class="fa-solid fa-sliders"></i> Mode</button>
+        <span class="status-badge" id="status">Status: Nonaktif</span>
+      </div>
     </div>
-    <div class="status-badge">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="statusText">Mencari GPS...</span>
+    
+    <!-- Profil Bar -->
+    <div class="profile-bar">
+      <img id="myAvatarPreview" src="https://api.dicebear.com/7.x/avataaars/svg?seed=default" alt="Avatar">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <label style="color: #9ca3af; font-size: 10px;">Nama Anda:</label>
+        <input type="text" id="myNameInput" placeholder="Nama Anda" style="width: 130px; font-size: 12px; padding: 3px 6px;" onchange="updateProfileInfo()">
+      </div>
+      <div>
+        <label for="myAvatarInput" class="upload-label">Pilih Foto</label>
+        <input type="file" id="myAvatarInput" accept="image/*" onchange="handlePhotoUpload(event)">
+      </div>
+    </div>
+
+    <div class="room-bar">
+      <label style="font-size: 12px;">Kode Ruangan:</label>
+      <input type="text" id="roomId" value="ruang123" style="width: 110px;">
+      <button id="toggleBtn" onclick="toggleTracking()">Bagikan Lokasi</button>
     </div>
   </header>
 
   <div class="container">
     <div id="map"></div>
+    
     <div class="sidebar">
-      <div class="sidebar-header">
-        <h3>Daftar Pengguna Aktif</h3>
-        <span class="user-count" id="userCount">0 Pengguna</span>
+      <!-- Panel Rute -->
+      <div id="routePanelContainer" style="display: none;" class="route-panel">
+        <div class="route-header">
+          <h3 style="margin: 0; color: #f3f4f6; font-size: 13px;"><i class="fa-solid fa-diamond-turn-right" style="color:#10b981;"></i> Petunjuk Arah</h3>
+          <button onclick="tutupPanelRute()" style="background: transparent; color: #9ca3af; padding: 2px 6px; font-size: 14px;" title="Tutup Rute"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        
+        <div class="route-modes">
+          <button class="mode-btn active" id="modeCar" onclick="setTravelMode('car')"><i class="fa-solid fa-car"></i><span id="timeCar">- mnt</span></button>
+          <button class="mode-btn" id="modeMotor" onclick="setTravelMode('motor')"><i class="fa-solid fa-motorcycle"></i><span id="timeMotor">- mnt</span></button>
+          <button class="mode-btn" id="modeWalk" onclick="setTravelMode('walk')"><i class="fa-solid fa-person-walking"></i><span id="timeWalk">- mnt</span></button>
+        </div>
+
+        <div class="route-inputs">
+          <div class="route-input-row">
+            <i class="fa-solid fa-location-dot" style="color: #60a5fa;"></i>
+            <span id="routeOriginText">Lokasi Anda (GPS Aktif)</span>
+          </div>
+          <div class="route-input-row">
+            <i class="fa-solid fa-location-dot" style="color: #ef4444;"></i>
+            <span id="routeDestinationText" style="font-weight: bold; color: white;">-</span>
+          </div>
+        </div>
+
+        <div class="route-summary-box">
+          <div class="route-summary-title">
+            <span id="routeSummaryDuration">- menit</span>
+            <span id="routeSummaryDistance" style="color: #34d399;">- meter</span>
+          </div>
+          <span id="routeDetailDesc" style="color: #9ca3af; font-size: 11px;">Rute langsung menuju target secara real-time.</span>
+        </div>
       </div>
-      <ul class="user-list" id="userList">
-        <li style="color: #64748b; font-size: 12px; text-align: center; margin-top: 20px;">Menunggu koneksi pengguna...</li>
-      </ul>
+
+      <!-- Daftar Pengguna -->
+      <div class="section-box" id="userListSection">
+        <h3>Daftar Pengguna <span style="font-size: 10px; color: #9ca3af;">(Klik untuk rute)</span></h3>
+        <ul class="user-list" id="userList">
+          <li style="color: #9ca3af; font-size: 12px; text-align: center; padding: 10px;">Klik "Bagikan Lokasi" untuk bergabung...</li>
+        </ul>
+      </div>
+
+      <!-- Chat Room -->
+      <div class="chat-container">
+        <div class="chat-messages" id="chatMessages">
+          <div style="color: #9ca3af; text-align: center; font-size: 11px; margin-top: 20px;">Belum ada pesan...</div>
+        </div>
+        <div class="chat-input-area">
+          <input type="text" id="chatInput" placeholder="Ketik pesan..." onkeypress="handleChatKey(event)">
+          <button onclick="sendChatMessage()">Kirim</button>
+        </div>
+      </div>
     </div>
   </div>
 
   <!-- Leaflet JS -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- MQTT JS via HTTPS/WSS -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
 
   <script>
-    // Semua pengguna harus memakai endpoint Realtime Database yang SAMA.
-    // Jika database/rules berbeda, lokasi tidak dapat dibagikan antarperangkat.
-    // GitHub Pages hanya meng-host HTML. Sinkronisasi antarperangkat memerlukan
-    // Firebase Realtime Database yang benar dan sama pada semua perangkat.
-    // Masukkan URL database dari Firebase Console (contoh format: https://NAMA-DB.REGION.firebasedatabase.app).
-    function getDatabaseBaseUrl() {
-      const key = 'liveLocationFirebaseDatabaseUrl';
-      let saved = '';
-      try { saved = localStorage.getItem(key) || ''; } catch (_) {}
-      if (!saved) {
-        saved = prompt(
-          'Masukkan URL Firebase Realtime Database Anda.\\n' +
-          'Ambil URL dari Firebase Console > Build > Realtime Database.\\n' +
-          'Jangan masukkan /users atau .json di akhir URL.'
-        ) || '';
-      }
-      saved = saved.trim().replace(/\/+$/, '').replace(/\/users(?:\.json)?$/, '');
-      if (saved && /^https:\/\//i.test(saved)) {
-        try { localStorage.setItem(key, saved); } catch (_) {}
-        return saved + '/users';
-      }
-      return '';
+    // --- SKRIP PILIH DEVICE ---
+    function pilihMode(mode) {
+      localStorage.setItem("selectedDeviceMode", mode);
+      applyDeviceMode(mode);
+      document.getElementById("deviceModal").style.display = "none";
+      setTimeout(() => { map.invalidateSize(); }, 200);
     }
-    const DB_URL = getDatabaseBaseUrl();
-    if (!DB_URL) {
-      updateStatus('URL Firebase belum diatur', false);
-      const list = document.getElementById('userList');
-      list.innerHTML = '';
-      const li = document.createElement('li');
-      li.className = 'user-item';
-      li.textContent = 'URL Firebase belum diatur. Muat ulang halaman lalu masukkan URL Realtime Database yang benar.';
-      list.appendChild(li);
-    }
-    const ACTIVE_MS = 45000;
-    const SYNC_MS = 3000;
 
+    function applyDeviceMode(mode) {
+      const body = document.body;
+      body.classList.remove("mode-desktop", "mode-mobile");
+      if (mode === 'mobile') {
+        body.classList.add("mode-mobile");
+      } else {
+        body.classList.add("mode-desktop");
+      }
+    }
+
+    function ubahModeDevice() {
+      document.getElementById("deviceModal").style.display = "flex";
+    }
+
+    // Cek apakah sudah pernah memilih sebelumnya
+    window.addEventListener("DOMContentLoaded", () => {
+      const savedMode = localStorage.getItem("selectedDeviceMode");
+      if (savedMode) {
+        applyDeviceMode(savedMode);
+        document.getElementById("deviceModal").style.display = "none";
+      } else {
+        // Deteksi otomatis sederhana jika belum pernah pilih
+        if (window.innerWidth <= 768) {
+          applyDeviceMode('mobile');
+        } else {
+          applyDeviceMode('desktop');
+        }
+      }
+    });
+
+    // --- INISIALISASI PETA & APLIKASI ---
     const map = L.map('map').setView([-6.200000, 106.816666], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}', {
       maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors'
+      attribution: 'Tiles &copy; Esri'
     }).addTo(map);
 
-    // ID unik per tab/perangkat; jangan memakai ID acak baru setiap pembaruan lokasi.
-    const myUserId = 'User_' + (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) :
-      Math.random().toString(36).slice(2, 10));
-    const markers = Object.create(null);
-    let activeUsers = {};
-    let myCoords = null;
-    let firstFix = true;
-    let lastWriteError = '';
+    let myUserId = localStorage.getItem("myUserId");
+    if (!myUserId) {
+      myUserId = "User_" + Math.floor(1000 + Math.random() * 9000);
+      localStorage.setItem("myUserId", myUserId);
+    }
 
-    function validUser(user) {
-      return user && Number.isFinite(Number(user.lat)) &&
-        Number.isFinite(Number(user.lng)) &&
-        Number(user.lat) >= -90 && Number(user.lat) <= 90 &&
-        Number(user.lng) >= -180 && Number(user.lng) <= 180 &&
-        Number.isFinite(Number(user.updatedAt));
+    let myName = localStorage.getItem("myName") || myUserId;
+    let myAvatar = localStorage.getItem("myAvatar") || `https://api.dicebear.com/7.x/avataaars/svg?seed=${myUserId}`;
+
+    document.getElementById("myNameInput").value = myName;
+    document.getElementById("myAvatarPreview").src = myAvatar;
+
+    const markers = {};
+    const activeUsers = {};
+    let watchId = null;
+    let myCoords = null;
+    let mqttClient = null;
+    let currentTopic = "";
+    let heartbeatInterval = null;
+    let targetUserId = null; 
+    let routeLine = null;    
+    let currentTravelMode = 'car';
+
+    function updateProfileInfo() {
+      const nameInput = document.getElementById("myNameInput").value.trim();
+      if (nameInput) {
+        myName = nameInput;
+        localStorage.setItem("myName", myName);
+      }
+      if (watchId !== null && myCoords) {
+        publishData({
+          type: "location",
+          id: myUserId,
+          name: myName,
+          avatar: myAvatar,
+          lat: myCoords.lat,
+          lng: myCoords.lng,
+          accuracy: myCoords.accuracy,
+          action: "update"
+        });
+      }
+    }
+
+    function handlePhotoUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          const MAX_SIZE = 100;
+          let width = img.width;
+          let height = img.height;
+          if (width > height) {
+            if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; }
+          } else {
+            if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          ctx.drawImage(img, 0, 0, width, height);
+
+          myAvatar = canvas.toDataURL('image/jpeg', 0.6);
+          localStorage.setItem("myAvatar", myAvatar);
+          document.getElementById("myAvatarPreview").src = myAvatar;
+          updateProfileInfo();
+        }
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
     }
 
     function hitungJarak(lat1, lon1, lat2, lon2) {
-      const values = [lat1, lon1, lat2, lon2].map(Number);
-      if (!values.every(Number.isFinite)) return 'Belum tersedia';
-      const [aLat, aLon, bLat, bLon] = values;
       const R = 6371;
-      const dLat = (bLat - aLat) * Math.PI / 180;
-      const dLon = (bLon - aLon) * Math.PI / 180;
-      const a = Math.sin(dLat / 2) ** 2 +
-        Math.cos(aLat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) *
-        Math.sin(dLon / 2) ** 2;
-      const distance = 2 * R * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return distance < 1 ? Math.round(distance * 1000) + ' meter' : distance.toFixed(2) + ' km';
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c; 
     }
 
-    async function updateLokasiSaya(lat, lng, accuracy) {
-      if (!DB_URL) return;
-      const data = { lat, lng, accuracy, updatedAt: Date.now(), userAgent: 'web' };
-      try {
-        const res = await fetch(`${DB_URL}/${encodeURIComponent(myUserId)}.json`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
-          cache: 'no-store'
+    function hitungWaktuTempuh(jarakKm, mode) {
+      let kecepatan = 30;
+      if (mode === 'motor') kecepatan = 35;
+      if (mode === 'walk') kecepatan = 4.5;
+
+      const totalJam = jarakKm / kecepatan;
+      const totalMenit = Math.round(totalJam * 60);
+      if (totalMenit < 1) return "< 1 mnt";
+      return totalMenit + " mnt";
+    }
+
+    function formatJarak(jarakKm) {
+      return jarakKm < 1 ? Math.round(jarakKm * 1000) + " meter" : jarakKm.toFixed(2) + " km";
+    }
+
+    function toggleTracking() {
+      const btn = document.getElementById("toggleBtn");
+      const status = document.getElementById("status");
+      const roomInput = document.getElementById("roomId");
+      const room = roomInput.value.trim() || "ruang123";
+
+      if (watchId === null) {
+        if (!("geolocation" in navigator)) {
+          alert("Browser Anda tidak mendukung Geolocation.");
+          return;
+        }
+
+        roomInput.disabled = true;
+        status.innerText = "Menghubungkan...";
+
+        const mqttServerUrl = 'wss://broker.hivemq.com:8884/mqtt';
+        currentTopic = "live_gps_chat_room_" + encodeURIComponent(room);
+
+        mqttClient = mqtt.connect(mqttServerUrl, {
+          clientId: "client_" + Math.random().toString(16).substring(2, 10),
+          clean: true
         });
-        if (!res.ok) throw new Error(`Database menolak penyimpanan (HTTP ${res.status})`);
-        lastWriteError = '';
-      } catch (err) {
-        lastWriteError = err.message || 'Tidak dapat menyimpan lokasi';
-        updateStatus('Database error', false);
-      }
-    }
 
-    async function syncSemuaUser() {
-      if (!DB_URL) return;
-      try {
-        const res = await fetch(`${DB_URL}.json`, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const now = Date.now();
-        activeUsers = {};
-
-        if (data && typeof data === 'object') {
-          for (const [id, user] of Object.entries(data)) {
-            // Abaikan data lama/rusak seperti "error", undefined, atau NaN.
-            if (!validUser(user)) continue;
-            if (now - Number(user.updatedAt) > ACTIVE_MS) continue;
-            activeUsers[id] = user;
-          }
-        }
-
-        for (const id of Object.keys(markers)) {
-          if (!activeUsers[id]) {
-            map.removeLayer(markers[id]);
-            delete markers[id];
-          }
-        }
-
-        for (const [id, user] of Object.entries(activeUsers)) {
-          const point = [Number(user.lat), Number(user.lng)];
-          const isMe = id === myUserId;
-          const popup = isMe ? `<b>Lokasi Anda</b><br>${id}` : `<b>${id}</b>`;
-          if (markers[id]) {
-            markers[id].setLatLng(point);
-            markers[id].setPopupContent(popup);
-          } else {
-            markers[id] = L.marker(point).addTo(map).bindPopup(popup);
-          }
-        }
-        renderUserList();
-        if (lastWriteError) updateStatus('Gagal menyimpan lokasi', false);
-      } catch (err) {
-        updateStatus('Database tidak terhubung', false);
-        const list = document.getElementById('userList');
-        list.innerHTML = '';
-        const li = document.createElement('li');
-        li.className = 'user-item';
-        li.textContent = 'Tidak dapat membaca database. Periksa URL Realtime Database dan Rules Firebase. Detail: ' + (err.message || err);
-        list.appendChild(li);
-        document.getElementById('userCount').textContent = 'Koneksi gagal';
-      }
-    }
-
-    function startGPS() {
-      if (!('geolocation' in navigator)) {
-        updateStatus('GPS tidak didukung', false);
-        alert('Browser ini tidak mendukung GPS.');
-        return;
-      }
-      if (!window.isSecureContext) {
-        updateStatus('Perlu HTTPS', false);
-        alert('Akses lokasi memerlukan HTTPS. Buka link website https:// atau localhost.');
-        return;
-      }
-      updateStatus('Meminta izin GPS...', false);
-      navigator.geolocation.watchPosition(async (pos) => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        myCoords = { lat: latitude, lng: longitude };
-        updateStatus(`AKTIF (±${Math.round(accuracy)}m)`, true);
-        if (firstFix) {
-          map.setView([latitude, longitude], 16);
-          firstFix = false;
-        }
-        await updateLokasiSaya(latitude, longitude, Math.round(accuracy));
-        await syncSemuaUser();
-      }, (err) => {
-        const messages = {
-          1: 'Izin GPS ditolak',
-          2: 'Lokasi tidak tersedia',
-          3: 'GPS timeout'
-        };
-        updateStatus(messages[err.code] || 'GPS error', false);
-        alert((messages[err.code] || 'GPS gagal') + '. Izinkan akses lokasi pada browser dan coba lagi.');
-      }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
-    }
-
-    function updateStatus(text, isActive) {
-      document.getElementById('statusText').textContent = text;
-      const dot = document.getElementById('statusDot');
-      dot.classList.toggle('active', Boolean(isActive));
-    }
-
-    function renderUserList() {
-      const listEl = document.getElementById('userList');
-      const countEl = document.getElementById('userCount');
-      listEl.innerHTML = '';
-      const entries = Object.entries(activeUsers);
-      countEl.textContent = `${entries.length} Pengguna`;
-
-      if (!entries.length) {
-        const li = document.createElement('li');
-        li.style.cssText = 'color:#94a3b8;font-size:12px;text-align:center;margin-top:20px;';
-        li.textContent = 'Menunggu pengguna lain membuka link dan mengizinkan GPS...';
-        listEl.appendChild(li);
-        return;
-      }
-
-      entries.sort(([a], [b]) => (a === myUserId ? -1 : b === myUserId ? 1 : 0));
-      for (const [id, user] of entries) {
-        const isMe = id === myUserId;
-        const li = document.createElement('li');
-        li.className = `user-item ${isMe ? 'is-me' : ''}`;
-        const name = document.createElement('div');
-        name.className = 'user-name';
-        name.textContent = isMe ? `${id} (Anda)` : id;
-        const accuracy = document.createElement('div');
-        accuracy.className = 'accuracy';
-        accuracy.textContent = `Akurasi GPS: ±${Math.round(Number(user.accuracy) || 0)}m`;
-        const distance = document.createElement('div');
-        distance.className = 'distance';
-        distance.textContent = isMe ? 'Posisi Anda' :
-          (myCoords ? 'Jarak: ' + hitungJarak(myCoords.lat, myCoords.lng, user.lat, user.lng) : 'Menghitung jarak...');
-        li.append(name, accuracy, distance);
-        li.addEventListener('click', () => {
-          map.setView([Number(user.lat), Number(user.lng)], 16);
-          if (markers[id]) markers[id].openPopup();
+        mqttClient.on('connect', () => {
+          status.innerText = "Terhubung";
+          mqttClient.subscribe(currentTopic, (err) => {
+            if (!err) {
+              publishData({ type: "location", action: "join", id: myUserId, name: myName, avatar: myAvatar });
+            }
+          });
         });
-        listEl.appendChild(li);
+
+        mqttClient.on('message', (topic, message) => {
+          try {
+            const data = JSON.parse(message.toString());
+
+            if (data.type === "chat") {
+              tampilkanPesanChat(data.senderName || data.sender, data.text);
+              return;
+            }
+
+            if (data.id === myUserId) return;
+
+            if (data.action === "offline" || data.action === "leave") {
+              removeUser(data.id);
+            } else if (data.action === "join") {
+              if (myCoords) {
+                publishData({
+                  type: "location",
+                  id: myUserId,
+                  name: myName,
+                  avatar: myAvatar,
+                  lat: myCoords.lat,
+                  lng: myCoords.lng,
+                  accuracy: myCoords.accuracy,
+                  action: "update"
+                });
+              }
+            } else if (data.lat && data.lng) {
+              activeUsers[data.id] = { 
+                name: data.name || data.id,
+                avatar: data.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.id}`,
+                lat: data.lat, 
+                lng: data.lng, 
+                accuracy: data.accuracy || 0 
+              };
+              updateMarker(data.id, data.lat, data.lng, data.name || data.id, activeUsers[data.id].avatar);
+              
+              if (targetUserId === data.id) {
+                gambarRuteKeTarget();
+              }
+              perbaruiDaftarPengguna();
+            }
+          } catch (e) {
+            console.error("Parse error:", e);
+          }
+        });
+
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const { latitude, longitude, accuracy } = position.coords;
+            const accRounded = Math.round(accuracy);
+            myCoords = { lat: latitude, lng: longitude, accuracy: accRounded };
+
+            activeUsers[myUserId] = { 
+              name: myName + " (Anda)", 
+              avatar: myAvatar, 
+              lat: latitude, 
+              lng: longitude, 
+              accuracy: accRounded 
+            };
+            
+            updateMarker(myUserId, latitude, longitude, myName + " (Anda)", myAvatar, true);
+            
+            if (!window.hasCenteredInitial) {
+              map.setView([latitude, longitude], 16);
+              window.hasCenteredInitial = true;
+            }
+
+            publishData({
+              type: "location",
+              id: myUserId,
+              name: myName,
+              avatar: myAvatar,
+              lat: latitude,
+              lng: longitude,
+              accuracy: accRounded,
+              action: "update"
+            });
+
+            if (targetUserId) {
+              gambarRuteKeTarget();
+            }
+
+            status.innerText = `AKTIF (±${accRounded}m)`;
+            perbaruiDaftarPengguna();
+          },
+          (err) => {
+            alert("Gagal mengambil GPS: " + err.message + "\nPastikan Anda mengizinkan izin lokasi (Location Permission).");
+            stopTracking();
+          },
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+        );
+
+        heartbeatInterval = setInterval(() => {
+          if (myCoords) {
+            publishData({
+              type: "location",
+              id: myUserId,
+              name: myName,
+              avatar: myAvatar,
+              lat: myCoords.lat,
+              lng: myCoords.lng,
+              accuracy: myCoords.accuracy,
+              action: "heartbeat"
+            });
+          }
+        }, 5000);
+
+        btn.innerText = "Hentikan";
+        btn.classList.add("active");
+
+      } else {
+        stopTracking();
       }
     }
 
-    // Polling juga berjalan saat GPS tidak mengirim perubahan posisi.
-    if (DB_URL) {
-      startGPS();
-      syncSemuaUser();
-      setInterval(syncSemuaUser, SYNC_MS);
+    function publishData(payload) {
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish(currentTopic, JSON.stringify(payload));
+      }
     }
 
-    // Jangan hapus data saat tab ditutup: beforeunload sering dibatalkan browser.
-    // Data otomatis dianggap tidak aktif setelah ACTIVE_MS tanpa heartbeat.
-    window.addEventListener('pagehide', () => {
-      try {
-        if (!DB_URL) return;
-        navigator.sendBeacon(`${DB_URL}/${encodeURIComponent(myUserId)}.json`,
-          new Blob(['null'], { type: 'application/json' }));
-      } catch (_) {}
+    function pilihTargetTrack(id) {
+      if (id === myUserId) return;
+      
+      targetUserId = id;
+      const targetUser = activeUsers[id];
+      const targetName = targetUser ? targetUser.name : id;
+
+      document.getElementById("routePanelContainer").style.display = "flex";
+      document.getElementById("routeDestinationText").innerText = targetName;
+
+      gambarRuteKeTarget();
+      perbaruiDaftarPengguna();
+    }
+
+    function tutupPanelRute() {
+      targetUserId = null;
+      document.getElementById("routePanelContainer").style.display = "none";
+      if (routeLine) {
+        map.removeLayer(routeLine);
+        routeLine = null;
+      }
+      perbaruiDaftarPengguna();
+    }
+
+    function setTravelMode(mode) {
+      currentTravelMode = mode;
+      document.getElementById("modeCar").classList.remove("active");
+      document.getElementById("modeMotor").classList.remove("active");
+      document.getElementById("modeWalk").classList.remove("active");
+
+      if (mode === 'car') document.getElementById("modeCar").classList.add("active");
+      if (mode === 'motor') document.getElementById("modeMotor").classList.add("active");
+      if (mode === 'walk') document.getElementById("modeWalk").classList.add("active");
+
+      if (targetUserId) {
+        gambarRuteKeTarget();
+      }
+    }
+
+    function gambarRuteKeTarget() {
+      if (!targetUserId || !myCoords || !activeUsers[targetUserId]) return;
+
+      const target = activeUsers[targetUserId];
+      const latlngs = [
+        [myCoords.lat, myCoords.lng],
+        [target.lat, target.lng]
+      ];
+
+      if (routeLine) {
+        routeLine.setLatLngs(latlngs);
+      } else {
+        routeLine = L.polyline(latlngs, { color: '#3b82f6', weight: 5, dashArray: '8, 8' }).addTo(map);
+      }
+      map.fitBounds(routeLine.getBounds(), { padding: [60, 60] });
+
+      const jarakKm = hitungJarak(myCoords.lat, myCoords.lng, target.lat, target.lng);
+      const jarakStr = formatJarak(jarakKm);
+      const waktuStr = hitungWaktuTempuh(jarakKm, currentTravelMode);
+
+      document.getElementById("routeSummaryDuration").innerText = waktuStr;
+      document.getElementById("routeSummaryDistance").innerText = jarakStr;
+      
+      document.getElementById("timeCar").innerText = hitungWaktuTempuh(jarakKm, 'car');
+      document.getElementById("timeMotor").innerText = hitungWaktuTempuh(jarakKm, 'motor');
+      document.getElementById("timeWalk").innerText = hitungWaktuTempuh(jarakKm, 'walk');
+      document.getElementById("routeDetailDesc").innerText = `Rute tercepat ke ${target.name} sesuai posisi real-time.`;
+    }
+
+    function removeUser(id) {
+      if (markers[id]) {
+        map.removeLayer(markers[id]);
+        delete markers[id];
+      }
+      delete activeUsers[id];
+      if (targetUserId === id) {
+        tutupPanelRute();
+      }
+      perbaruiDaftarPengguna();
+    }
+
+    function stopTracking() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
+      if (mqttClient && mqttClient.connected) {
+        publishData({ type: "location", id: myUserId, action: "offline" });
+        mqttClient.end();
+      }
+      if (markers[myUserId]) {
+        map.removeLayer(markers[myUserId]);
+        delete markers[myUserId];
+      }
+      tutupPanelRute();
+
+      activeUsersObj = {};
+      myCoords = null;
+      window.hasCenteredInitial = false;
+
+      document.getElementById("roomId").disabled = false;
+      document.getElementById("toggleBtn").innerText = "Bagikan Lokasi";
+      document.getElementById("toggleBtn").classList.remove("active");
+      document.getElementById("status").innerText = "Status: Nonaktif";
+      
+      const userListEl = document.getElementById("userList");
+      userListEl.innerHTML = '<li style="color: #9ca3af; font-size: 12px; text-align: center; padding: 10px;">Klik "Bagikan Lokasi" untuk bergabung...</li>';
+    }
+
+    function updateMarker(id, lat, lng, nameText, avatarUrl, isMe = false) {
+      const fallbackImg = `https://api.dicebear.com/7.x/avataaars/svg?seed=${id}`;
+      const iconHtml = `
+        <div class="custom-marker-pin ${isMe ? 'is-me' : ''}">
+          <img src="${avatarUrl || fallbackImg}" onerror="this.src='${fallbackImg}'" alt="Pin">
+        </div>
+      `;
+
+      const customIcon = L.divIcon({
+        className: 'custom-div-icon',
+        html: iconHtml,
+        iconSize: [40, 40],
+        iconAnchor: [20, 20],
+        popupAnchor: [0, -20]
+      });
+
+      if (markers[id]) {
+        markers[id].setLatLng([lat, lng]);
+        markers[id].setIcon(customIcon);
+        markers[id].setPopupContent(`<b>${nameText}</b>`);
+      } else {
+        markers[id] = L.marker([lat, lng], { icon: customIcon }).addTo(map).bindPopup(`<b>${nameText}</b>`);
+      }
+    }
+
+    function perbaruiDaftarPengguna() {
+      const userListEl = document.getElementById("userList");
+      userListEl.innerHTML = "";
+
+      const keys = Object.keys(activeUsers);
+      if (keys.length === 0) {
+        userListEl.innerHTML = '<li style="color: #9ca3af; font-size: 12px; text-align: center; padding: 10px;">Belum ada pengguna aktif...</li>';
+        return;
+      }
+
+      keys.forEach((id) => {
+        const user = activeUsers[id];
+        const isMe = (id === myUserId);
+        const isSelected = (id === targetUserId);
+        const fallbackImg = `https://api.dicebear.com/7.x/avataaars/svg?seed=${id}`;
+        
+        let infoTeks = "Posisi Anda";
+        if (!isMe && myCoords) {
+          const jarakKm = hitungJarak(myCoords.lat, myCoords.lng, user.lat, user.lng);
+          infoTeks = `Jarak: ${formatJarak(jarakKm)}`;
+        }
+
+        const li = document.createElement("li");
+        li.className = `user-item ${isMe ? 'is-me' : ''} ${isSelected ? 'selected-target' : ''}`;
+        if (!isMe) {
+          li.onclick = () => pilihTargetTrack(id);
+          li.title = "Klik untuk membuka rute ke user ini";
+        }
+
+        li.innerHTML = `
+          <img src="${user.avatar || fallbackImg}" onerror="this.src='${fallbackImg}'" class="user-avatar-sm" alt="Avatar">
+          <div class="user-info-text">
+            <strong>${user.name || id}</strong>
+            <span class="distance">${infoTeks}</span>
+          </div>
+          ${isSelected ? '<i class="fa-solid fa-chevron-right" style="color:#f59e0b; font-size:10px;"></i>' : ''}
+        `;
+        userListEl.appendChild(li);
+      });
+    }
+
+    function sendChatMessage() {
+      const input = document.getElementById("chatInput");
+      const text = input.value.trim();
+      if (!text) return;
+
+      if (!mqttClient || !mqttClient.connected) {
+        alert("Anda harus terhubung terlebih dahulu untuk mengirim chat.");
+        return;
+      }
+
+      publishData({
+        type: "chat",
+        sender: myUserId,
+        senderName: myName,
+        text: text
+      });
+
+      input.value = "";
+    }
+
+    function handleChatKey(e) {
+      if (e.key === "Enter") {
+        sendChatMessage();
+      }
+    }
+
+    function tampilkanPesanChat(senderName, text) {
+      const chatBox = document.getElementById("chatMessages");
+      if (chatBox.querySelector("div[style*='text-align: center']")) {
+        chatBox.innerHTML = "";
+      }
+
+      const div = document.createElement("div");
+      div.className = "chat-msg";
+      div.innerHTML = `<span class="sender">${escapeHtml(senderName)}</span>${escapeHtml(text)}`;
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function escapeHtml(string) {
+      return string.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    window.addEventListener('beforeunload', () => {
+      stopTracking();
     });
   </script>
 
